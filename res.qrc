@@ -12,5 +12,6 @@
         <file>res/audio/match.wav</file>
         <file>res/audio/select.wav</file>
         <file>res/backgrounds/stage_bg.png</file>
+        <file>res/audio/bgm.wav</file>
     </qresource>
 </RCC>

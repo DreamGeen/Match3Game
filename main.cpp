@@ -1,10 +1,10 @@
 #include <QApplication>
-#include <QStackedWidget> // 【新增】引入堆栈窗口模块
+#include <QStackedWidget>
+#include <QSoundEffect> // 【新增】引入音效模块
 #include "LoginWidget.h"
 #include "LobbyWidget.h"
 #include "MainWindow.h"
 #include "DBHelper.h"
-
 
 int main(int argc, char *argv[]) {
     QApplication a(argc, argv);
@@ -16,36 +16,39 @@ int main(int argc, char *argv[]) {
     // 2. 创建全局唯一的“舞台” (堆栈窗口容器)
     QStackedWidget *mainStage = new QStackedWidget();
     mainStage->setWindowTitle("Bocchi Clear! - 摇滚消消乐");
-    mainStage->setWindowState(Qt::WindowMaximized); // 让大舞台全局最大化
+    mainStage->setWindowState(Qt::WindowMaximized);
 
-    // 把背景图贴在最底层的舞台上，这样无论怎么切换，背景永远是静止且连贯的！
     mainStage->setObjectName("mainStage");
     mainStage->setStyleSheet("#mainStage { border-image: url(:/res/backgrounds/stage_bg.png); }");
     mainStage->setAttribute(Qt::WA_StyledBackground, true);
+
+    // =======================================================
+    // 【新增】：创建并启动全局背景音乐
+    QSoundEffect *bgm = new QSoundEffect(mainStage); // 将音乐挂载到 mainStage，同生共死
+    bgm->setSource(QUrl::fromLocalFile(":/res/audio/bgm.wav")); // 替换为你实际的音乐文件名
+    bgm->setLoopCount(QSoundEffect::Infinite); // 设置无限循环播放
+    bgm->setVolume(0.6); // 背景音乐音量稍微调小点（0.0 ~ 1.0），别盖过消除的爽快音效
+    bgm->play(); // 开播！
+    // =======================================================
 
     // 3. 创建登录界面并放入舞台
     LoginWidget *loginWin = new LoginWidget();
     mainStage->addWidget(loginWin);
 
-    // 4. 流程控制：登录成功 -> 无缝切换到大厅
+    // 4. 流程控制
     QObject::connect(loginWin, &LoginWidget::loginSuccess, [=](UserSession session) {
         LobbyWidget *lobbyWin = new LobbyWidget(session);
         mainStage->addWidget(lobbyWin);
-
-        // 【核心魔法】：瞬间将当前显示的画面切换为大厅，没有任何系统窗口的闪烁！
         mainStage->setCurrentWidget(lobbyWin);
 
-        // 流程控制：大厅选择模式 -> 无缝切换到游戏主场景
         QObject::connect(lobbyWin, &LobbyWidget::modeSelected, [=](UserSession session, GameMode mode) {
             MainWindow *gameWin = new MainWindow(session, mode);
             mainStage->addWidget(gameWin);
-
-            // 再次瞬间无缝切换！
             mainStage->setCurrentWidget(gameWin);
         });
     });
 
-    // 5. 拉开帷幕，显示大舞台
+    // 5. 拉开帷幕
     mainStage->show();
 
     return a.exec();
