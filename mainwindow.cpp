@@ -1,9 +1,9 @@
 #include "MainWindow.h"
-#include <QHBoxLayout> // 【新增】：用于顶部状态栏的水平排布
+#include <QHBoxLayout> // 用于顶部状态栏的水平排布
 
-
-MainWindow::MainWindow(UserSession session, QWidget *parent)
-    : QMainWindow(parent), m_session(session)
+// 【修改点】：接收 GameMode mode
+MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
+    : QMainWindow(parent), m_session(session), m_currentMode(mode)
 {
     setWindowTitle("Bocchi Clear! - 摇滚消消乐");
 
@@ -14,24 +14,28 @@ MainWindow::MainWindow(UserSession session, QWidget *parent)
     setupUI();
 
     // 2. 启动游戏逻辑
-    m_logic->startNewGame(m_session.uid, GameMode::Single);
+    // 【关键修改】：使用大厅传过来的 mode 启动游戏，而不是写死的 GameMode::Single
+    m_logic->startNewGame(m_session.uid, m_currentMode);
+
+    // 如果选择了人机对战模式，可以在这里或者 GameLogic 中触发 AI 相关的定时器
+    if (m_currentMode == GameMode::AI) {
+        // TODO: 启动 AI 定时器等操作
+        // 例如：m_logic->startAI();
+    }
 
     // 3. 监听得分变化
     connect(m_logic, &GameLogic::scoreUpdated, this, &MainWindow::updateScoreLabel);
 
-    // 【新增】：连接连击信号
+    // 4. 连接连击信号
     connect(m_logic, &GameLogic::comboUpdated, this, &MainWindow::updateComboLabel);
 }
 
-
-
-
 void MainWindow::setupUI() {
     QWidget *centralWidget = new QWidget(this);
-    // 【关键1】：给主容器起个名字，防止背景污染其他窗口
+    // 给主容器起个名字，防止背景污染其他窗口
     centralWidget->setObjectName("mainContainer");
 
-    // 【关键2】：注入全局摇滚风格 QSS
+    // 注入全局摇滚风格 QSS
     this->setStyleSheet(R"(
         #mainContainer {
             /* 替换为你的绝美 Livehouse/活动室 背景图路径 */
@@ -68,26 +72,29 @@ void MainWindow::setupUI() {
     mainLayout->setContentsMargins(30, 20, 30, 30);
     mainLayout->setSpacing(20); // 顶部栏和棋盘之间的间距
 
-    // 【关键3】：优化顶部状态栏排布
-    m_infoLabel = new QLabel(QString("🎸 乐手: %1 | 🏆 历史最高: %2").arg(m_session.nickname).arg(m_session.totalScore));
+    // 优化顶部状态栏排布
+    QString modeStr = (m_currentMode == GameMode::Single) ? "单人" : (m_currentMode == GameMode::AI ? "人机" : "网络");
+    m_infoLabel = new QLabel(QString("🎸 乐手: %1 | 模式: %2 | 🏆 历史最高: %3")
+                                 .arg(m_session.nickname)
+                                 .arg(modeStr)
+                                 .arg(m_session.totalScore));
     m_infoLabel->setObjectName("infoLabel"); // 绑定 QSS
 
     m_scoreLabel = new QLabel("🎵 当前得分: 0");
     m_scoreLabel->setObjectName("scoreLabel"); // 绑定 QSS
 
-    // 【新增】：初始化 Combo 标签
+    // 初始化 Combo 标签
     m_comboLabel = new QLabel("");
     m_comboLabel->setObjectName("comboLabel");
     m_comboLabel->setAlignment(Qt::AlignCenter);
     m_comboLabel->hide(); // 默认隐藏，等有连击了再显示
-
 
     // 创建一个水平布局来放置信息和分数
     QHBoxLayout *topLayout = new QHBoxLayout();
     topLayout->addWidget(m_infoLabel);
     topLayout->addStretch(); // 左弹簧
 
-    topLayout->addWidget(m_comboLabel); // 【新增】：把 Combo 放在正中间！
+    topLayout->addWidget(m_comboLabel); // 把 Combo 放在正中间！
 
     topLayout->addStretch(); // 右弹簧
     topLayout->addWidget(m_scoreLabel);
@@ -105,7 +112,6 @@ void MainWindow::updateScoreLabel(int score) {
     m_scoreLabel->setText(QString("🎵 当前得分: %1").arg(score));
 }
 
-
 void MainWindow::updateComboLabel(int combo) {
     // 连击数小于 2 时不显示
     if (combo < 2) {
@@ -117,7 +123,7 @@ void MainWindow::updateComboLabel(int combo) {
     // 更新文字内容，加上火焰 Emoji 增加燃点
     m_comboLabel->setText(QString("🔥 %1 COMBO!").arg(combo));
 
-    // 【核心动画】：使用 QVariantAnimation 动态改变 QSS 中的 font-size
+    // 使用 QVariantAnimation 动态改变 QSS 中的 font-size
     QVariantAnimation *ani = new QVariantAnimation(this);
     ani->setDuration(300); // 动画持续 300 毫秒
 

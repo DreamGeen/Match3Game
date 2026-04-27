@@ -59,6 +59,9 @@ private:
     // 注意：默认值 = true 只能写在 .h 头文件里
     void processMatches(QPoint triggerPos, bool triggerRefill = true);
 
+    // 【新增这一行】：声明处理下落和填充的函数，并给一个默认参数 true
+    void handleMatchesAndRefill(bool isFirstMatchInTurn = true);
+
 
 
     // 内部状态

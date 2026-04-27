@@ -13,6 +13,7 @@ SOURCES += \
     dbhelper.cpp \
     gamelogic.cpp \
     gamepanel.cpp \
+    lobbywidget.cpp \
     loginwidget.cpp \
     main.cpp \
     mainwindow.cpp \
@@ -24,6 +25,7 @@ HEADERS += \
     gamelogic.h \
     gamepanel.h \
     global.h \
+    lobbywidget.h \
     loginwidget.h \
     mainwindow.h \
     testdbhelper.h

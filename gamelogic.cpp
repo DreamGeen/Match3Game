@@ -298,7 +298,7 @@ void GameLogic::endAndSaveGame(bool isWin) {
     emit gameOver(m_currentScore);
 }
 
-void GameLogic::processMatches(QPoint triggerPos) {
+void GameLogic::processMatches(QPoint triggerPos, bool triggerRefill) {
     qDebug() << ">>> [ProcessMatches] 启动！检查坐标: (" << triggerPos.x() << "," << triggerPos.y() << ")";
 
     if (triggerPos.x() < 0 || triggerPos.x() >= m_rows || triggerPos.y() < 0 || triggerPos.y() >= m_cols) return;

@@ -6,28 +6,29 @@
 #include <QVBoxLayout>
 #include "GamePanel.h"
 #include "Global.h"
-#include <QVariantAnimation> // 【新增】：用于实现平滑的数值动画
+#include <QVariantAnimation> // 用于实现平滑的数值动画
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(UserSession session, QWidget *parent = nullptr);
+    // 【修改点】：增加 GameMode mode 参数，以便从大厅接收玩家选择的模式
+    explicit MainWindow(UserSession session, GameMode mode, QWidget *parent = nullptr);
 
 private slots:
     void updateScoreLabel(int score);
-
-    void updateComboLabel(int combo); // 【新增】：接收连击数更新的槽函数
+    void updateComboLabel(int combo); // 接收连击数更新的槽函数
 
 private:
     UserSession m_session;
+    GameMode m_currentMode; // 【新增】：保存当前游戏模式
     GamePanel *m_gamePanel;
     GameLogic *m_logic;
 
     QLabel *m_scoreLabel;
     QLabel *m_infoLabel;
-    QLabel *m_comboLabel; // <--- 【加上这一行！】
+    QLabel *m_comboLabel;
 
     void setupUI();
 };
 
-#endif
+#endif // MAINWINDOW_H
