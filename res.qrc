@@ -1,0 +1,16 @@
+<RCC>
+    <qresource prefix="/">
+        <file>res/items/color_1.png</file>
+        <file>res/items/color_2.png</file>
+        <file>res/items/color_3.png</file>
+        <file>res/items/color_4.png</file>
+        <file>res/items/color_5.png</file>
+        <file>res/items/eff_bomb.png</file>
+        <file>res/items/eff_line_h.png</file>
+        <file>res/items/eff_v.png</file>
+        <file>res/items/magic_bird.png</file>
+        <file>res/audio/match.wav</file>
+        <file>res/audio/select.wav</file>
+        <file>res/backgrounds/stage_bg.png</file>
+    </qresource>
+</RCC>
