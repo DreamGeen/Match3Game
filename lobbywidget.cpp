@@ -1,48 +1,102 @@
 #include "LobbyWidget.h"
+#include <QFrame>
 
 LobbyWidget::LobbyWidget(UserSession session, QWidget *parent)
     : QWidget(parent), m_session(session) {
+
+    // 强制 Qt 渲染顶层 QWidget 的 QSS 背景
+    this->setAttribute(Qt::WA_StyledBackground, true);
+
     initUI();
     setWindowTitle("Bocchi Clear! - 游戏大厅");
-    setFixedSize(400, 500);
+
+
+
+
+    // 如果你想要真正的纯粹全屏（没有任何边框，连任务栏都遮住），把上面那行注释掉，换成这行：
+    // this->showFullScreen();
+    // 注意：如果是纯全屏，你需要按 Alt+F4 才能关闭窗口，或者得在界面里自己写一个“退出游戏”的按钮。
 }
 
 void LobbyWidget::initUI() {
-    auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->setSpacing(20);
-    mainLayout->setContentsMargins(40, 30, 40, 30);
+    this->setObjectName("lobbyMain");
+    this->setStyleSheet("#lobbyMain { border-image: url(:/res/backgrounds/stage_bg.png); }");
 
-    // 1. 玩家信息展示区
-    QLabel *welcomeLabel = new QLabel(QString("欢迎回来，%1！").arg(m_session.nickname), this);
-    welcomeLabel->setStyleSheet("font-size: 20px; font-weight: bold; color: #333;");
+    auto *mainLayout = new QVBoxLayout(this);
+    // 外层边距设为 0，让背景完全铺满
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+
+    QFrame *panel = new QFrame(this);
+    panel->setObjectName("glassPanel");
+
+    // 【修改点 2】：因为屏幕变大了，把中间的菜单面板也适当放大一点，比例更协调
+    panel->setFixedSize(500, 520);
+
+    panel->setStyleSheet(R"(
+        #glassPanel {
+            background-color: rgba(20, 20, 30, 210);
+            border-radius: 15px;
+            border: 1px solid rgba(255, 105, 180, 80);
+        }
+    )");
+
+    auto *panelLayout = new QVBoxLayout(panel);
+    panelLayout->setSpacing(30); // 间距也稍微拉大一点
+    panelLayout->setContentsMargins(40, 50, 40, 50);
+
+    // --- 下面的文字和按钮部分 ---
+    QLabel *welcomeLabel = new QLabel(QString("🎸 欢迎回来，%1！").arg(m_session.nickname), panel);
+    welcomeLabel->setStyleSheet("font-size: 26px; font-weight: 900; color: #ffffff; background: transparent;"); // 字号微微放大
     welcomeLabel->setAlignment(Qt::AlignCenter);
 
-    QLabel *scoreLabel = new QLabel(QString("🎸 当前总积分: %1").arg(m_session.totalScore), this);
-    scoreLabel->setStyleSheet("font-size: 14px; color: #666;");
+    QLabel *scoreLabel = new QLabel(QString("🏆 当前总积分: %1").arg(m_session.totalScore), panel);
+    scoreLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700; background: transparent;");
     scoreLabel->setAlignment(Qt::AlignCenter);
 
-    // 2. 模式选择按钮
-    QString btnStyle = "QPushButton { background-color: #f0f0f0; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; padding: 15px; }"
-                       "QPushButton:hover { background-color: #ffb6c1; border-color: #ff69b4; color: white; }";
+    QString btnStyle = R"(
+        QPushButton {
+            background-color: rgba(255, 105, 180, 30);
+            border: 2px solid #ff69b4;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 20px; /* 按钮字号放大 */
+            font-weight: bold;
+            padding: 15px;   /* 按钮增厚 */
+            font-family: "Microsoft YaHei";
+        }
+        QPushButton:hover {
+            background-color: #ff69b4;
+            color: #ffffff;
+            border: 2px solid #ffffff;
+        }
+        QPushButton:pressed {
+            background-color: #c71585;
+        }
+    )";
 
-    QPushButton *singleBtn = new QPushButton("🎸 单人闯关 (Classic)", this);
-    QPushButton *aiBtn = new QPushButton("🤖 人机对战 (AI Mode)", this);
-    QPushButton *onlineBtn = new QPushButton("🌐 网络竞技 (Online)", this);
+    QPushButton *singleBtn = new QPushButton("🎸 单人闯关 (Classic)", panel);
+    QPushButton *aiBtn = new QPushButton("🤖 人机对战 (AI Mode)", panel);
+    QPushButton *onlineBtn = new QPushButton("🌐 网络竞技 (Online)", panel);
 
     singleBtn->setStyleSheet(btnStyle);
     aiBtn->setStyleSheet(btnStyle);
     onlineBtn->setStyleSheet(btnStyle);
 
-    // 布局组装
-    mainLayout->addWidget(welcomeLabel);
-    mainLayout->addWidget(scoreLabel);
-    mainLayout->addSpacing(20);
-    mainLayout->addWidget(singleBtn);
-    mainLayout->addWidget(aiBtn);
-    mainLayout->addWidget(onlineBtn);
-    mainLayout->addStretch();
+    singleBtn->setCursor(Qt::PointingHandCursor);
+    aiBtn->setCursor(Qt::PointingHandCursor);
+    onlineBtn->setCursor(Qt::PointingHandCursor);
 
-    // 信号绑定
+    panelLayout->addWidget(welcomeLabel);
+    panelLayout->addWidget(scoreLabel);
+    panelLayout->addSpacing(15);
+    panelLayout->addWidget(singleBtn);
+    panelLayout->addWidget(aiBtn);
+    panelLayout->addWidget(onlineBtn);
+    panelLayout->addStretch();
+
+    // 【核心机制】：把组装好的半透明面板居中添加到最大化的主窗口里
+    mainLayout->addWidget(panel, 0, Qt::AlignCenter);
+
     connect(singleBtn, &QPushButton::clicked, this, &LobbyWidget::onSingleClicked);
     connect(aiBtn, &QPushButton::clicked, this, &LobbyWidget::onAIClicked);
     connect(onlineBtn, &QPushButton::clicked, this, &LobbyWidget::onOnlineClicked);

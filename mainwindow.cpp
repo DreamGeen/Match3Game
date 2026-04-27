@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include <QHBoxLayout> // 用于顶部状态栏的水平排布
+#include <QFrame> // 确保引入了 QFrame
 
 // 【修改点】：接收 GameMode mode
 MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
@@ -32,77 +33,85 @@ MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
 
 void MainWindow::setupUI() {
     QWidget *centralWidget = new QWidget(this);
-    // 给主容器起个名字，防止背景污染其他窗口
     centralWidget->setObjectName("mainContainer");
 
-    // 注入全局摇滚风格 QSS
-    this->setStyleSheet(R"(
-        #mainContainer {
-            /* 替换为你的绝美 Livehouse/活动室 背景图路径 */
-            border-image: url(:/res/backgrounds/stage_bg.png);
+    // 【修改点1】：去掉重复的 stage_bg 背景图设置，因为底层的 QStackedWidget 已经有背景了
+    // 这里把 centralWidget 设置为全透明
+    centralWidget->setStyleSheet("background: transparent;");
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+
+    // 【修改点2】：创建一个中央玻璃面板（游戏机台）
+    QFrame *boardPanel = new QFrame(centralWidget);
+    boardPanel->setObjectName("boardPanel");
+
+    // 设定一个固定大小，刚好能包住 640x640 的棋盘和顶部的计分板
+    boardPanel->setFixedSize(740, 780);
+
+    boardPanel->setStyleSheet(R"(
+        #boardPanel {
+            /* 【关键修改】：把最后的 210 改成 100，让它变透，露出背景灯光！ */
+            background-color: rgba(30, 30, 45, 100);
+            border-radius: 20px;
+            border: 2px solid rgba(255, 105, 180, 150); /* 稍微加亮一点粉色边框 */
         }
 
-        /* 通用标签样式：白字 + 半透明黑底 + 圆角，保证在花哨背景下绝对清晰 */
         QLabel {
             color: white;
-            background-color: rgba(0, 0, 0, 160);
-            border-radius: 8px;
-            padding: 8px 12px;
+            background-color: transparent;
             font-family: "Microsoft YaHei", "Segoe UI";
         }
 
-        /* 针对 infoLabel 的专属字号 */
         QLabel#infoLabel {
             font-size: 16px;
             font-weight: bold;
         }
 
-        /* 针对 scoreLabel 的专属字号和波奇粉色 */
         QLabel#scoreLabel {
             font-size: 22px;
             font-weight: 900;
-            color: #ffb6c1; /* 调整为更柔和的高亮粉色，避免刺眼 */
-            border: 2px solid #ff69b4; /* 加上粉色边框增加立体感 */
+            color: #ffb6c1;
         }
     )");
 
-    // 主垂直布局
-    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
-    // 增加四周的边距(左, 上, 右, 下)，露出更多背景图，形成“相框”感
-    mainLayout->setContentsMargins(30, 20, 30, 30);
-    mainLayout->setSpacing(20); // 顶部栏和棋盘之间的间距
 
-    // 优化顶部状态栏排布
+    // 为面板内部创建一个垂直布局
+    QVBoxLayout *panelLayout = new QVBoxLayout(boardPanel);
+    panelLayout->setContentsMargins(40, 30, 40, 30);
+    panelLayout->setSpacing(20);
+
+    // --- 顶部状态栏排布 ---
     QString modeStr = (m_currentMode == GameMode::Single) ? "单人" : (m_currentMode == GameMode::AI ? "人机" : "网络");
-    m_infoLabel = new QLabel(QString("🎸 乐手: %1 | 模式: %2 | 🏆 历史最高: %3")
+    m_infoLabel = new QLabel(QString("🎸 乐手: %1 | 模式: %2 | 🏆 最高: %3")
                                  .arg(m_session.nickname)
                                  .arg(modeStr)
                                  .arg(m_session.totalScore));
-    m_infoLabel->setObjectName("infoLabel"); // 绑定 QSS
+    m_infoLabel->setObjectName("infoLabel");
 
     m_scoreLabel = new QLabel("🎵 当前得分: 0");
-    m_scoreLabel->setObjectName("scoreLabel"); // 绑定 QSS
+    m_scoreLabel->setObjectName("scoreLabel");
 
-    // 初始化 Combo 标签
     m_comboLabel = new QLabel("");
     m_comboLabel->setObjectName("comboLabel");
     m_comboLabel->setAlignment(Qt::AlignCenter);
-    m_comboLabel->hide(); // 默认隐藏，等有连击了再显示
+    m_comboLabel->hide();
 
-    // 创建一个水平布局来放置信息和分数
+    // 水平组装顶部栏
     QHBoxLayout *topLayout = new QHBoxLayout();
     topLayout->addWidget(m_infoLabel);
-    topLayout->addStretch(); // 左弹簧
-
-    topLayout->addWidget(m_comboLabel); // 把 Combo 放在正中间！
-
-    topLayout->addStretch(); // 右弹簧
+    topLayout->addStretch();
+    topLayout->addWidget(m_comboLabel);
+    topLayout->addStretch();
     topLayout->addWidget(m_scoreLabel);
 
-    // 将组装好的顶部栏和游戏面板加入主布局
-    mainLayout->addLayout(topLayout);
-    // 将 GamePanel 居中放置，即使窗口拉伸，棋盘也不会变形
-    mainLayout->addWidget(m_gamePanel, 0, Qt::AlignHCenter);
+    // 【核心组装】：把顶部栏和游戏棋盘装进玻璃面板里！
+    panelLayout->addLayout(topLayout);
+    // 将 GamePanel 居中放入面板
+    panelLayout->addWidget(m_gamePanel, 0, Qt::AlignHCenter);
+
+    // 【最外层排版】：将整个玻璃机台正居中放在全屏的主窗口里
+    mainLayout->addWidget(boardPanel, 0, Qt::AlignCenter);
 
     setCentralWidget(centralWidget);
 }
