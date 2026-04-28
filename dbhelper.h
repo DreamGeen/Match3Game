@@ -35,8 +35,9 @@ public:
                                     const QString& nickname = "新玩家");
 
     // 用户登录
-    [[nodiscard]] bool login(const QString& username, const QString& password,
-                             int& outUserId, QString& outNickname);
+    [[nodiscard]]  bool login(const QString& username, const QString& password,
+               int& outUserId, QString& outNickname,
+               int& outAvatarId, int& outTotalScore);
 
     // 退出登录
     bool logout(int userId);
@@ -47,6 +48,9 @@ public:
      */
     [[nodiscard]] bool recordGameResult(int userId, int score, GameMode mode,
                                         bool isWin, int durationSec);
+
+    // 获取用户最新总积分
+    int getUserTotalScore(int userId);
 
 private:
     // 私有构造函数 (单例模式要求)

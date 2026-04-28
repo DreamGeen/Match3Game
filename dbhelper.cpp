@@ -93,7 +93,7 @@ bool DBHelper::registerUser(const QString& username, const QString& password, co
  * @brief 用户登录
  */
 // 在 DBHelper.cpp 中更新 login 函数
-bool DBHelper::login(const QString& username, const QString& password, int& outUserId, QString& outNickname) {
+bool DBHelper::login(const QString& username, const QString& password, int& outUserId, QString& outNickname,int& outAvatarId, int& outTotalScore) {
     if (!db.isOpen()) return false;
 
     QSqlQuery query(db);
@@ -106,6 +106,10 @@ bool DBHelper::login(const QString& username, const QString& password, int& outU
     if (query.exec() && query.next()) {
         outUserId = query.value("user_id").toInt();
         outNickname = query.value("nickname").toString();
+
+        // 👇【关键修复】：将数据库查到的值赋给传出参数
+        outAvatarId = query.value("avatar_id").toInt();
+        outTotalScore = query.value("total_score").toInt();
 
         // 更新在线状态
         QSqlQuery updateQuery(db);
@@ -174,4 +178,18 @@ bool DBHelper::recordGameResult(int userId, int score, GameMode mode, bool isWin
 
     // 3. 提交事务
     return db.commit();
+}
+
+
+int DBHelper::getUserTotalScore(int userId) {
+    if (!db.isOpen()) return 0;
+
+    QSqlQuery query(db);
+    query.prepare("SELECT total_score FROM user_info WHERE user_id = :userId");
+    query.bindValue(":userId", userId);
+
+    if (query.exec() && query.next()) {
+        return query.value("total_score").toInt();
+    }
+    return 0;
 }

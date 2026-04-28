@@ -34,46 +34,30 @@ void BlockWidget::loadResources() {
         return;
     }
 
-    // 1. 处理魔力鸟 (唱片)
-    if (m_data.special == SpecialType::MagicBird) {
-        // 修正路径：确保 magic_bird.png 在你的资源文件夹里
-        if (!m_mainPixmap.load(":/res/items/magic_bird.png")) {
-            qDebug() << "!!! [错误] 唱片图片加载失败: :/res/effects/magic_bird.png";
+    // 👇【核心修改】：所有特殊方块直接无视底色，加载完整大图！
+    if (m_data.special != SpecialType::None) {
+        QString imgPath;
+        switch (m_data.special) {
+        case SpecialType::MagicBird:      imgPath = ":/res/items/magic_bird.png"; break;
+        case SpecialType::LineHorizontal: imgPath = ":/res/items/eff_line_h.png"; break;
+        case SpecialType::LineVertical:   imgPath = ":/res/items/eff_v.png"; break;
+        case SpecialType::Bomb:           imgPath = ":/res/items/eff_bomb.png"; break;
+        default: break;
         }
-        m_overlayPixmap = QPixmap();
-        return;
+
+        if (!m_mainPixmap.load(imgPath)) {
+            qDebug() << "!!! [错误] 特殊特效图加载失败:" << imgPath;
+        }
+        m_overlayPixmap = QPixmap(); // 清空覆盖层
+        return; // 💥 关键：直接 return，彻底跳过底色加载！
     }
 
-    // 2. 加载角色基础图 (波奇、虹夏等)
+    // 如果是普通角色方块，才正常加载底色
     QString charPath = QString(":/res/items/color_%1.png").arg(m_data.color);
     if (!m_mainPixmap.load(charPath)) {
         qDebug() << "!!! [错误] 角色底图加载失败:" << charPath;
     }
-
-    // 3. 【核心修正】：匹配你提到的 eff_ 前缀文件名
-    QString overlayPath;
-    switch (m_data.special) {
-    case SpecialType::LineHorizontal:
-        overlayPath = ":/res/items/eff_line_h.png"; // 对应你的命名
-        break;
-    case SpecialType::LineVertical:
-        overlayPath = ":/res/items/eff_v.png";      // 对应你的命名
-        break;
-    case SpecialType::Bomb:
-        overlayPath = ":/res/items/eff_bomb.png";   // 对应你的命名
-        break;
-    default:
-        overlayPath = "";
-        break;
-    }
-
-    if (!overlayPath.isEmpty()) {
-        if (!m_overlayPixmap.load(overlayPath)) {
-            qDebug() << "!!! [错误] 特效叠加图加载失败:" << overlayPath;
-        }
-    } else {
-        m_overlayPixmap = QPixmap();
-    }
+    m_overlayPixmap = QPixmap();
 }
 
 void BlockWidget::paintEvent(QPaintEvent *) {

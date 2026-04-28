@@ -11,6 +11,7 @@ class LobbyWidget : public QWidget {
     Q_OBJECT
 public:
     explicit LobbyWidget(UserSession session, QWidget *parent = nullptr);
+    void refreshScore();
 
 signals:
     // 当玩家选择某种模式时发出信号
@@ -23,6 +24,7 @@ private slots:
 
 private:
     UserSession m_session;
+    QLabel *m_scoreLabel;
     void initUI();
 };
 

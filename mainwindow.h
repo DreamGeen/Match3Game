@@ -9,7 +9,9 @@
 #include <QVector>
 #include <QPushButton>      // 【新增】
 #include <QMediaPlayer>     // 【新增】视频播放器
-#include <QVideoWidget>     // 【新增】视频显示窗口
+#include <QGraphicsView>
+#include <QGraphicsScene>
+#include <QGraphicsVideoItem>
 #include "GamePanel.h"
 #include "Global.h"
 
@@ -73,7 +75,9 @@ private:
 
     // 【新增】：多媒体播放组件
     QMediaPlayer *m_mediaPlayer;
-    QVideoWidget *m_videoWidget;
+    QGraphicsView *m_videoView;
+    QGraphicsScene *m_videoScene;
+    QGraphicsVideoItem *m_videoItem;
 
 
     bool m_isBonusTime = false; // 【新增】：记录是否进入了狂欢时间

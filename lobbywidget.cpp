@@ -1,5 +1,6 @@
 #include "LobbyWidget.h"
 #include <QFrame>
+#include "DBHelper.h"
 
 LobbyWidget::LobbyWidget(UserSession session, QWidget *parent)
     : QWidget(parent), m_session(session) {
@@ -49,9 +50,12 @@ void LobbyWidget::initUI() {
     welcomeLabel->setStyleSheet("font-size: 26px; font-weight: 900; color: #ffffff; background: transparent;"); // 字号微微放大
     welcomeLabel->setAlignment(Qt::AlignCenter);
 
-    QLabel *scoreLabel = new QLabel(QString("🏆 当前总积分: %1").arg(m_session.totalScore), panel);
-    scoreLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700; background: transparent;");
-    scoreLabel->setAlignment(Qt::AlignCenter);
+    // 改成下面这样：
+    m_scoreLabel = new QLabel(QString("🏆 当前总积分: %1").arg(m_session.totalScore), panel);
+    m_scoreLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700; background: transparent;");
+    m_scoreLabel->setAlignment(Qt::AlignCenter);
+
+
 
     QString btnStyle = R"(
         QPushButton {
@@ -87,7 +91,8 @@ void LobbyWidget::initUI() {
     onlineBtn->setCursor(Qt::PointingHandCursor);
 
     panelLayout->addWidget(welcomeLabel);
-    panelLayout->addWidget(scoreLabel);
+    // 把后面加进布局的 panelLayout->addWidget(scoreLabel); 也改成 m_scoreLabel
+    panelLayout->addWidget(m_scoreLabel);
     panelLayout->addSpacing(15);
     panelLayout->addWidget(singleBtn);
     panelLayout->addWidget(aiBtn);
@@ -100,6 +105,14 @@ void LobbyWidget::initUI() {
     connect(singleBtn, &QPushButton::clicked, this, &LobbyWidget::onSingleClicked);
     connect(aiBtn, &QPushButton::clicked, this, &LobbyWidget::onAIClicked);
     connect(onlineBtn, &QPushButton::clicked, this, &LobbyWidget::onOnlineClicked);
+}
+
+// 第二处：在文件末尾实现刷新函数
+void LobbyWidget::refreshScore() {
+    // 从数据库重新拉取最新积分
+    int newScore = DBHelper::getInstance().getUserTotalScore(m_session.uid);
+    m_session.totalScore = newScore; // 更新本地 session
+    m_scoreLabel->setText(QString("🏆 当前总积分: %1").arg(newScore)); // 刷新 UI
 }
 
 void LobbyWidget::onSingleClicked() { emit modeSelected(m_session, GameMode::Single); }

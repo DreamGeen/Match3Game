@@ -182,9 +182,11 @@ void LoginWidget::performLogin() {
     int uid, avatarId, totalScore;
     QString nickname;
 
-    if (DBHelper::getInstance().login(username, password, uid, nickname)) {
-        UserSession session = { uid, username, nickname, 1, 0 };
-        emit loginSuccess(session); // 直接触发切换大厅信号
+    // 👇【关键修复】：调用更新后的登录函数
+    if (DBHelper::getInstance().login(username, password, uid, nickname, avatarId, totalScore)) {
+        // 👇【关键修复】：使用数据库查出的真实 avatarId 和 totalScore，不再硬编码为 1 和 0
+        UserSession session = { uid, username, nickname, avatarId, totalScore };
+        emit loginSuccess(session);
     } else {
         QMessageBox::critical(this, "登录失败", "账号或密码不正确，请重试。");
     }

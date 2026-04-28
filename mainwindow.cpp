@@ -8,6 +8,8 @@
 #include <QGraphicsDropShadowEffect>
 #include <QVariantAnimation>
 #include <QApplication>
+#include <QStackedLayout>
+#include <QStyle>
 
 
 MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
@@ -23,7 +25,7 @@ MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
     // ==========================================
     QString appPath = QApplication::applicationDirPath();
     m_levels = {
-        {500,  25, ":/res/backgrounds/level1.png", appPath + "/video/mv1.mp4"},
+        {300,  10, ":/res/backgrounds/level1.png", appPath + "/video/mv1.mp4"},
         {3500,  25, ":/res/backgrounds/level2.png", appPath + "/video/mv2.mp4"},
         {6000, 22, ":/res/backgrounds/level3.png", appPath + "/video/mv3.mp4"},
         {10000, 20, ":/res/backgrounds/level4.png", appPath + "/video/mv4.mp4"},
@@ -45,24 +47,30 @@ MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
     connect(m_logic, &GameLogic::comboUpdated, this, &MainWindow::updateComboLabel);
 }
 
+
 void MainWindow::setupUI() {
     QWidget *centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
     centralWidget->setObjectName("mainContainer");
     centralWidget->setStyleSheet("background: transparent;");
 
-    // === 【新增】：初始化视频播放器，并放在最底层 ===
-    m_videoWidget = new QVideoWidget(centralWidget);
-    m_videoWidget->hide(); // 默认隐藏，不达标不放视频
+    // 👇 1. 全新的软件级视频合成引擎 (完美支持透明UI层叠)
+    m_videoView = new QGraphicsView(centralWidget);
+    m_videoView->setStyleSheet("background: transparent; border: none;");
+    m_videoView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_videoView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_videoView->setAttribute(Qt::WA_TransparentForMouseEvents, true); // 让鼠标穿透视频层打到方块上
+    m_videoView->hide(); // 默认先隐藏
 
-    // 👇【新增1：解决未填满屏幕】设置视频缩放模式为：保持比例并扩展铺满全屏（会裁掉多余的黑边）
-    m_videoWidget->setAspectRatioMode(Qt::KeepAspectRatioByExpanding);
-    // 如果你宁愿画面被拉伸变形也要看到完整 MV，可以改成 Qt::IgnoreAspectRatio
+    m_videoScene = new QGraphicsScene(m_videoView);
+    m_videoView->setScene(m_videoScene);
+
+    m_videoItem = new QGraphicsVideoItem();
+    m_videoItem->setAspectRatioMode(Qt::KeepAspectRatioByExpanding);
+    m_videoScene->addItem(m_videoItem);
 
     m_mediaPlayer = new QMediaPlayer(this);
-    m_mediaPlayer->setVideoOutput(m_videoWidget);
-
-    // 👇【新增2：解决播完黑屏】监听播放状态，如果播到底了，就把进度条拉回 0 秒重新播！
+    m_mediaPlayer->setVideoOutput(m_videoItem);
     connect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged, [this](QMediaPlayer::MediaStatus status){
         if (status == QMediaPlayer::EndOfMedia) {
             m_mediaPlayer->setPosition(0);
@@ -70,34 +78,20 @@ void MainWindow::setupUI() {
         }
     });
 
-    // === 1. 双层背景 ===
+    // 👇 2. 静态图片背景层 (依然贴在最底层)
     m_baseBgLabel = new QLabel(centralWidget);
     m_bgRevealLabel = new QLabel(centralWidget);
-
-
-    // 👇【加上这三行核心修复】：让这三个图层像幽灵一样，鼠标直接穿透它们点到方块！
     m_baseBgLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     m_bgRevealLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    m_videoWidget->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
-    m_baseBgLabel->lower();
-    m_videoWidget->lower(); // 确保视频在 boardPanel 下方，但在 baseBg 之上
-
-    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
-
-    // === 2. 游戏主面板（改为浅色磨砂质感！） ===
+    // 👇 3. 游戏UI面板层
     QFrame *boardPanel = new QFrame(centralWidget);
     boardPanel->setObjectName("boardPanel");
-    boardPanel->setFixedSize(820, 780); // 稍微加宽，给顶部留出充裕空间
-
-    // 【视觉终极版】：高级暗黑高透玻璃（墨镜质感）
+    boardPanel->setFixedSize(820, 780);
     boardPanel->setStyleSheet(R"(
         #boardPanel {
-            /* 使用存粹的黑色，透明度调到 80（大约30%不透明），就像一层高级汽车贴膜 */
             background-color: rgba(0, 0, 0, 80);
             border-radius: 20px;
-            /* 弃用粗边框，改为极细（1px）、极弱（透明度40）的白线，勾勒出面板边缘即可 */
             border: 1px solid rgba(255, 255, 255, 40);
         }
         QLabel { color: white; background: transparent; font-family: "Microsoft YaHei", "Segoe UI"; }
@@ -107,41 +101,35 @@ void MainWindow::setupUI() {
     panelLayout->setContentsMargins(30, 30, 30, 30);
     panelLayout->setSpacing(20);
 
-    // === 3. 高品质文字阴影（解决亮色背景看不清字的问题） ===
     auto applyTextShadow = [](QWidget* widget) {
         QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(widget);
-        shadow->setOffset(1, 2);                // 阴影向右下偏移
-        shadow->setBlurRadius(5);               // 阴影边缘微模糊
-        shadow->setColor(QColor(0, 0, 0, 220)); // 强烈的纯黑投影
+        shadow->setOffset(1, 2); shadow->setBlurRadius(5); shadow->setColor(QColor(0, 0, 0, 220));
         widget->setGraphicsEffect(shadow);
     };
 
-    // === 4. 顶部状态栏排布 ===
+    // --- 顶部状态栏排布 ---
     QHBoxLayout *topLayout = new QHBoxLayout();
-
     QString modeStr = (m_currentMode == GameMode::Single) ? "单人" : "人机";
     m_infoLabel = new QLabel(QString("🎸 %1 | %2").arg(m_session.nickname).arg(modeStr));
     m_infoLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;");
-    applyTextShadow(m_infoLabel); // <--- 应用纯黑阴影
+    applyTextShadow(m_infoLabel);
 
     QHBoxLayout *targetLayout = new QHBoxLayout();
     targetLayout->setSpacing(5);
 
     m_levelTargetLabel = new QLabel("🎯 目标: 0");
-    // 【关键修复】：给目标分数锁定至少 160 的宽度，彻底防止它挤压、盖住星星！
     m_levelTargetLabel->setMinimumWidth(160);
     m_levelTargetLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700;");
     applyTextShadow(m_levelTargetLabel);
     targetLayout->addWidget(m_levelTargetLabel);
-
-    targetLayout->addSpacing(10); // 强行拉开一段距离
+    targetLayout->addSpacing(10);
 
     for (int i = 0; i < 3; ++i) {
         m_starLabels[i] = new QLabel("☆");
-        m_starLabels[i]->setFixedSize(30, 30); // 给每个星星画死固定大小的格子，绝对不越界
+        m_starLabels[i]->setFixedSize(30, 30);
         m_starLabels[i]->setAlignment(Qt::AlignCenter);
         m_starLabels[i]->setStyleSheet("font-size: 24px; color: rgba(255,255,255,200);");
-        applyTextShadow(m_starLabels[i]); // <--- 星星也加上阴影
+        applyTextShadow(m_starLabels[i]);
         targetLayout->addWidget(m_starLabels[i]);
     }
 
@@ -153,25 +141,33 @@ void MainWindow::setupUI() {
     m_scoreLabel->setStyleSheet("font-size: 18px; font-weight: 900; color: #ffb6c1;");
     applyTextShadow(m_scoreLabel);
 
-    // 用 addStretch 撑开所有元素，均匀分布
-    topLayout->addWidget(m_infoLabel);
-    topLayout->addStretch();
-    topLayout->addLayout(targetLayout);
-    topLayout->addStretch();
-    topLayout->addWidget(m_movesLabel);
-    topLayout->addStretch();
+    topLayout->addWidget(m_infoLabel); topLayout->addStretch();
+    topLayout->addLayout(targetLayout); topLayout->addStretch();
+    topLayout->addWidget(m_movesLabel); topLayout->addStretch();
     topLayout->addWidget(m_scoreLabel);
 
     panelLayout->addLayout(topLayout);
     panelLayout->addWidget(m_gamePanel, 0, Qt::AlignHCenter);
 
+    // 用布局把整个游戏框死死居中
+    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->addWidget(boardPanel, 0, Qt::AlignCenter);
 }
+
 
 void MainWindow::loadLevel(int index) {
     if (index >= m_levels.size()) return;
 
     m_isBonusTime = false; // 【新增】：新关卡一定要重置开关！
+
+    // 👇【加上这行救命代码】：确保新关卡开始时，彻底关闭硬件透明，让 QSS 重新接管背景绘制！
+    QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
+    if (boardPanel) {
+        boardPanel->setAttribute(Qt::WA_TranslucentBackground, false);
+    }
+
+
 
     m_currentLevelIndex = index;
     LevelConfig cfg = m_levels[index];
@@ -185,7 +181,10 @@ void MainWindow::loadLevel(int index) {
 
     // 装载对应关卡的 MV
     m_mediaPlayer->setMedia(QUrl::fromLocalFile(cfg.mvPath));
-    m_videoWidget->hide(); // 重置为隐藏
+
+
+     m_videoView->hide();
+
     m_baseBgLabel->show(); // 确保静态背景图恢复显示
 
     // === 【核心修复：背景传承逻辑】 ===
@@ -210,96 +209,109 @@ void MainWindow::loadLevel(int index) {
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
 
-    // 1. 铺满底层背景
     if (!m_baseBgPixmap.isNull()) {
         m_baseBgLabel->setGeometry(0, 0, width(), height());
         m_baseBgLabel->setPixmap(m_baseBgPixmap.scaled(size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
     }
 
-    // 2. 缩放顶层背景（准备被裁剪）
     if (!m_targetBgPixmap.isNull()) {
         m_scaledBg = m_targetBgPixmap.scaled(size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-
-        // 👇【核心修复】：让目标背景图永远和窗口一样大，位置死死固定在 (0,0)
         m_bgRevealLabel->setGeometry(0, 0, width(), height());
         m_bgRevealLabel->setPixmap(m_scaledBg);
-
         updateScoreLabel(m_logic->getCurrentScore());
     }
 
     if (m_resultOverlay) m_resultOverlay->setGeometry(0, 0, width(), height());
-    if (m_videoWidget) m_videoWidget->setGeometry(0, 0, width(), height());
 
+    // 👇 新增：确保视频永远撑满全屏
+    if (m_videoView) {
+        m_videoView->setGeometry(0, 0, width(), height());
+        m_videoScene->setSceneRect(0, 0, width(), height());
+        m_videoItem->setSize(QSizeF(width(), height()));
+    }
 }
+
 void MainWindow::updateScoreLabel(int score) {
     m_scoreLabel->setText(QString("🎵 当前得分: %1").arg(score));
 
     // ==========================================
-    // 💥 终极物理拦截：只要开关打开，强制透明并直接 return！
+    // 💥 终极物理拦截：狂欢时间强制透明并退出
     // ==========================================
     if (m_isBonusTime) {
         QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
         if (boardPanel) {
-            // 用 background: transparent 彻底干掉黑框
-            boardPanel->setStyleSheet("background: transparent; border: none;");
+            boardPanel->setStyleSheet(R"(
+                #boardPanel { background: none; border: none; }
+                QLabel { color: white; background: transparent; font-family: "Microsoft YaHei", "Segoe UI"; }
+            )");
+
+            // ❌ 把下面这行代码彻底删掉！我们现在换了视频引擎，根本不需要它了！
+            // boardPanel->setAttribute(Qt::WA_TranslucentBackground, true);
+
         }
         m_bgRevealLabel->hide();
         m_baseBgLabel->hide();
 
-        // 狂欢时间分数还在涨，星星也要跟着更新
         for (int i = 0; i < 3; ++i) {
             if (score >= m_starThresholds[i]) {
                 m_starLabels[i]->setText("★");
                 m_starLabels[i]->setStyleSheet("font-size: 28px; color: #FFD700; background: transparent; font-weight: bold;");
             }
         }
-        return; // 💥 直接退出函数！彻底斩断后续所有的透明度计算和旧动画逻辑！
+        return; // 💥 直接退出，保持 MV 播放时的全透明
     }
-
 
     int target = m_levels[m_currentLevelIndex].targetScore;
     double percent = qBound(0.0, (double)score / target, 1.0);
 
     // ==========================================
-    // 视觉特效 1：分数越高，中间面板的“黑雾”越淡 (加入平滑过渡动画版)
+    // 视觉特效 1：完美融合版 (开场平滑显现 + 得分黑雾变淡 + 边框同步渐变)
     // ==========================================
-    int targetAlpha = 120 - (int)(percent * 80); // 计算目标透明度
-    QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
+    int targetBgAlpha = 120 - (int)(percent * 80); // 背景目标透明度 (120 -> 40)
+    int targetBorderAlpha = 40;                    // 边框的最终透明度
 
+    QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
     if (boardPanel) {
-        // 核心机制：查找是否已经有正在运行的透明度动画，有的话先停止，防止快速连击时画面闪烁
         QVariantAnimation* oldAnim = boardPanel->findChild<QVariantAnimation*>("alphaAnim");
-        int currentAlpha = targetAlpha;
+        int startBgAlpha = targetBgAlpha;
 
         if (oldAnim) {
-            currentAlpha = oldAnim->currentValue().toInt(); // 从当前动画进行到的一半截断
+            startBgAlpha = oldAnim->currentValue().toInt(); // 继承当前动画进度
             oldAnim->stop();
             oldAnim->deleteLater();
         } else if (score == 0) {
-            // 如果没有正在播放的动画，且分数刚重置为0（说明刚进入新关卡），让它从通透(40)开始逐渐变暗
-            currentAlpha = 40;
+            // 👇【核心修复】：新关卡开始时，让它从 0 (完全透明) 开始渐变！
+            startBgAlpha = 0;
         }
 
-        // 创建新的过渡动画并挂载到 boardPanel 上
         QVariantAnimation *alphaAnim = new QVariantAnimation(boardPanel);
         alphaAnim->setObjectName("alphaAnim");
-
-        // 动画策略：新关卡变暗时时间长一点(800ms)更丝滑，平时得分变亮时快一点(150ms)跟随消除节奏
-        alphaAnim->setDuration(score == 0 ? 800 : 150);
-        alphaAnim->setStartValue(currentAlpha);
-        alphaAnim->setEndValue(targetAlpha);
+        alphaAnim->setDuration(score == 0 ? 800 : 150); // 开场动画慢一点(800ms)，平时得分快一点(150ms)
+        alphaAnim->setStartValue(startBgAlpha);
+        alphaAnim->setEndValue(targetBgAlpha);
         alphaAnim->setEasingCurve(score == 0 ? QEasingCurve::InOutQuad : QEasingCurve::Linear);
 
-        // 绑定动画值到 QSS 样式表
-        connect(alphaAnim, &QVariantAnimation::valueChanged, [boardPanel](const QVariant &value){
-            int alpha = value.toInt();
-            boardPanel->setStyleSheet(
-                QString("#boardPanel { background-color: rgba(20, 20, 30, %1); border-radius: 15px; border: 2px solid rgba(255, 105, 180, 100); }")
-                    .arg(alpha)
-                );
+        // 👇【完美融合】：同时计算背景和边框的透明度，写入同一个 QSS
+        connect(alphaAnim, &QVariantAnimation::valueChanged, [boardPanel, targetBorderAlpha, score](const QVariant &value){
+            int bgAlpha = value.toInt();
+            int borderAlpha = targetBorderAlpha;
+
+            // 如果是开场动画(score==0)，让边框也跟随背景的进度从 0 慢慢变到 40
+            if (score == 0) {
+                double animProgress = (double)bgAlpha / 120.0; // 计算动画进度 0.0 ~ 1.0
+                borderAlpha = (int)(targetBorderAlpha * animProgress);
+            }
+
+            boardPanel->setStyleSheet(QString(R"(
+                #boardPanel {
+                    background-color: rgba(0, 0, 0, %1);
+                    border-radius: 20px;
+                    border: 1px solid rgba(255, 255, 255, %2);
+                }
+                QLabel { color: white; background: transparent; font-family: "Microsoft YaHei", "Segoe UI"; }
+            )").arg(bgAlpha).arg(borderAlpha)); // %1 填入背景透明度，%2 填入边框透明度
         });
 
-        // 动画结束自动释放内存
         connect(alphaAnim, &QVariantAnimation::finished, alphaAnim, &QObject::deleteLater);
         alphaAnim->start();
     }
@@ -308,34 +320,24 @@ void MainWindow::updateScoreLabel(int score) {
     // 视觉特效 2：背景图从底部升起，作为主进度条
     // ==========================================
     if (!m_scaledBg.isNull()) {
-        // 👇【核心修复】：如果已经达到目标分数（正在放 MV），就不要再显示背景图了
         if (score >= target) {
             m_bgRevealLabel->hide();
             m_baseBgLabel->hide();
-        }else{
-
-
-         int revealHeight = m_scaledBg.height() * percent;
-         if (revealHeight > 0) {
-            // 👇【核心修复】：不再反复切图和移动组件位置！
-            // 而是给组件套一个“视口遮罩”，只显示底部 revealHeight 那么高的一块区域
-            m_bgRevealLabel->setMask(QRegion(0, this->height() - revealHeight, this->width(), revealHeight));
-            m_bgRevealLabel->show();
-
-            // 👇【加上这一行核心修复】：不管背景怎么升起，强制让游戏面板跑到最顶层来接管鼠标！
-            if (boardPanel) boardPanel->raise();
-
-          } else {
-            m_bgRevealLabel->hide();
-          }
+        } else {
+            int revealHeight = m_scaledBg.height() * percent;
+            if (revealHeight > 0) {
+                m_bgRevealLabel->setMask(QRegion(0, this->height() - revealHeight, this->width(), revealHeight));
+                m_bgRevealLabel->show();
+                if (boardPanel) boardPanel->raise(); // 保持游戏面板在最顶层
+            } else {
+                m_bgRevealLabel->hide();
+            }
         }
     }
 
-
-    // 更新星星 (保持原样)
+    // 更新星星
     for (int i = 0; i < 3; ++i) {
         if (score >= m_starThresholds[i]) {
-            // 换成实心的大星星 ★
             m_starLabels[i]->setText("★");
             m_starLabels[i]->setStyleSheet("font-size: 28px; color: #FFD700; background: transparent; font-weight: bold;");
         } else {
@@ -406,49 +408,38 @@ void MainWindow::initConnections() {
     // 【替换1】：接管结束结算信号
     connect(m_logic, &GameLogic::levelFinished, this, &MainWindow::onLevelFinished);
 
-    // 【新增2】：触发狂欢时间 MV！
     connect(m_logic, &GameLogic::targetReached, this, [this](){
+        m_isBonusTime = true;
 
-        m_isBonusTime = true; // 【新增】：拉下开关，进入狂欢模式
-
-        // 隐藏掉原本用来做进度条的图，露出下方的 VideoWidget
         m_baseBgLabel->hide();
         m_bgRevealLabel->hide();
 
-        m_videoWidget->show();
-        m_videoWidget->lower(); // 确保它在最底层
+        m_videoView->show(); // 让咱们的新视频引擎露出来
         m_mediaPlayer->play();
 
-        // 可以在这里加个醒目的动画文字提示 "BONUS TIME!!"
-
-
-        // 👇【加上这两行核心修复】：播放视频时，也必须强制把游戏面板提上来！
         QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
         if (boardPanel) {
-            boardPanel->raise();
-
-
-                // 👇👇👇【核心秒杀补丁】：在放 MV 的这一瞬间，立刻亲手把面板变透明！ 👇👇👇
-
-                // 1. 掐死正在进行变暗的动画
-                QList<QVariantAnimation*> anims = boardPanel->findChildren<QVariantAnimation*>();
+            // 停掉动画
+            QList<QVariantAnimation*> anims = boardPanel->findChildren<QVariantAnimation*>();
             for (QVariantAnimation* anim : anims) {
                 anim->stop();
                 anim->deleteLater();
             }
 
-            // 2. 瞬间扒掉底裤（同时保留里面文字的样式防止变黑）
+            // 扒掉底板（因为换了软件渲染，这次背景会完美的融合成视频画面！）
             boardPanel->setStyleSheet(R"(
-                #boardPanel { background: transparent; border: none; }
+                #boardPanel { background: none; border: none; }
                 QLabel { color: white; background: transparent; font-family: "Microsoft YaHei", "Segoe UI"; }
             )");
-        };
+        }
     });
 }
 // 槽函数实现
 void MainWindow::onLevelFinished(bool isWin) {
     m_mediaPlayer->stop(); // 游戏结束，停止视频
-    m_videoWidget->hide();
+
+
+     m_videoView->hide();
 
     if (isWin) {
         if (m_currentLevelIndex < m_levels.size() - 1) {

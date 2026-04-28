@@ -130,33 +130,62 @@ QSet<QPoint> GameLogic::triggerSpecialEffect(QPoint pos, SpecialType type) {
 bool GameLogic::swapTiles(QPoint p1, QPoint p2) {
     if (m_isGameOver || m_remainingMoves <= 0) return false;
 
-    // 1. 执行虚拟交换并检查匹配
+    // 1. 物理交换
     std::swap(m_board[p1.x()][p1.y()], m_board[p2.x()][p2.y()]);
-    QSet<QPoint> matches = findMatches();
 
+    Tile &t1 = m_board[p1.x()][p1.y()];
+    Tile &t2 = m_board[p2.x()][p2.y()];
+
+    // 检测是不是魔力鸟
+    bool isBirdT1 = (t1.special == SpecialType::MagicBird);
+    bool isBirdT2 = (t2.special == SpecialType::MagicBird);
+
+    // ===============================================
+    // 💥 特权机制：只有“魔力鸟”可以直接免检放行并引爆全屏！
+    // ===============================================
+    if (isBirdT1 || isBirdT2) {
+        m_remainingMoves--;
+        emit movesUpdated(m_remainingMoves);
+        m_currentCombo = 1;
+
+        QSet<QPoint> toRemove;
+
+        if (isBirdT1) {
+            t1.color = t2.color; // 魔力鸟吸收对方的颜色
+            toRemove.insert(p1);
+        }
+        if (isBirdT2) {
+            t2.color = t1.color; // 魔力鸟吸收对方的颜色
+            toRemove.insert(p2);
+        }
+
+        removeMatches(toRemove);
+        handleMatchesAndRefill();
+        checkGameStatus();
+        return true;
+    }
+
+    // ===============================================
+    // 其他方块 (包括炸弹、激光)：必须老老实实去测有没有形成三消！
+    // ===============================================
+    QSet<QPoint> matches = findMatches();
     if (matches.isEmpty()) {
-        // 失败回滚
+        // 失败回滚：没凑齐三连消，退回去
         std::swap(m_board[p1.x()][p1.y()], m_board[p2.x()][p2.y()]);
         return false;
     }
 
-    // 2. 核心修改：交换成功扣除步数
     m_remainingMoves--;
     emit movesUpdated(m_remainingMoves);
-
-    // 3. 执行消除逻辑
     m_currentCombo = 1;
-    // 【核心修复】：必须传入 false，让两个交换点都结算完，再统一触发下落！
+
     processMatches(p1, false);
     processMatches(p2, false);
+
     handleMatchesAndRefill();
-
-    // 4. 检查胜负状态
     checkGameStatus();
-
     return true;
 }
-
 
 
 
@@ -182,43 +211,112 @@ void GameLogic::checkGameStatus() {
 QSet<QPoint> GameLogic::findMatches() {
     QSet<QPoint> matchSet;
 
+    // 👇【核心魔法】：Lambda 表达式，定义哪些方块是“赖子（万能牌）”
+    // 注意：故意把 MagicBird 排除在外，因为它走的是 swapTiles 里的免检引爆特权，不需要凑三消！
+    auto isWildcard = [](const Tile& t) {
+        return t.special == SpecialType::Bomb ||
+               t.special == SpecialType::LineHorizontal ||
+               t.special == SpecialType::LineVertical;
+    };
+
     // 1. 横向扫描 (Row Scan)
     for (int r = 0; r < GameConfig::BOARD_ROWS; ++r) {
         for (int c = 0; c < GameConfig::BOARD_COLS - 2; ++c) {
-            int color = m_board[r][c].color;
-            if (color == 0) continue; // 跳过空格
+            Tile t1 = m_board[r][c];
+            Tile t2 = m_board[r][c+1];
+            Tile t3 = m_board[r][c+2];
 
-            // 检查连续三个是否同色
-            if (m_board[r][c+1].color == color && m_board[r][c+2].color == color) {
+            // 遇到空格直接跳过
+            if (t1.color == 0 || t2.color == 0 || t3.color == 0) continue;
+
+            int targetColor = -1; // -1 表示当前还没有确立基准颜色
+            bool match = true;
+            Tile tiles[3] = {t1, t2, t3};
+
+            // 🌟 赖子判定逻辑：检查连续三个方块是否能匹配
+            for(int i = 0; i < 3; i++) {
+                if(!isWildcard(tiles[i])) { // 如果不是赖子
+                    if(targetColor == -1) {
+                        targetColor = tiles[i].color; // 确立基准颜色 (比如第一个遇到的是红色)
+                    } else if(targetColor != tiles[i].color) {
+                        match = false; // 颜色冲突 (比如红-赖子-蓝)，匹配失败！
+                        break;
+                    }
+                }
+            }
+
+            // 如果匹配成功
+            if(match) {
                 matchSet.insert(QPoint(r, c));
                 matchSet.insert(QPoint(r, c+1));
                 matchSet.insert(QPoint(r, c+2));
 
-                // 处理 4 连或 5 连的情况
+                // 向右继续检查 4 连或 5 连，赖子同样有效！
                 int nextC = c + 3;
-                while (nextC < GameConfig::BOARD_COLS && m_board[r][nextC].color == color) {
-                    matchSet.insert(QPoint(r, nextC));
-                    nextC++;
+                while (nextC < GameConfig::BOARD_COLS) {
+                    Tile nextT = m_board[r][nextC];
+                    if (nextT.color == 0) break; // 遇到空格断开
+
+                    // 如果是赖子，或者是基准颜色，继续连！
+                    if (isWildcard(nextT) || targetColor == -1 || nextT.color == targetColor) {
+                        matchSet.insert(QPoint(r, nextC));
+
+                        // 如果之前全是赖子，现在终于遇到普通方块了，赶紧把基准颜色定下来
+                        if (!isWildcard(nextT) && targetColor == -1) {
+                            targetColor = nextT.color;
+                        }
+                        nextC++;
+                    } else {
+                        break; // 颜色不匹配，延伸结束
+                    }
                 }
             }
         }
     }
 
-    // 2. 纵向扫描 (Column Scan)
+    // 2. 纵向扫描 (Column Scan) - 逻辑与横向完全一致
     for (int c = 0; c < GameConfig::BOARD_COLS; ++c) {
         for (int r = 0; r < GameConfig::BOARD_ROWS - 2; ++r) {
-            int color = m_board[r][c].color;
-            if (color == 0) continue;
+            Tile t1 = m_board[r][c];
+            Tile t2 = m_board[r+1][c];
+            Tile t3 = m_board[r+2][c];
 
-            if (m_board[r+1][c].color == color && m_board[r+2][c].color == color) {
+            if (t1.color == 0 || t2.color == 0 || t3.color == 0) continue;
+
+            int targetColor = -1;
+            bool match = true;
+            Tile tiles[3] = {t1, t2, t3};
+
+            for(int i = 0; i < 3; i++) {
+                if(!isWildcard(tiles[i])) {
+                    if(targetColor == -1) {
+                        targetColor = tiles[i].color;
+                    } else if(targetColor != tiles[i].color) {
+                        match = false;
+                        break;
+                    }
+                }
+            }
+
+            if(match) {
                 matchSet.insert(QPoint(r, c));
                 matchSet.insert(QPoint(r+1, c));
                 matchSet.insert(QPoint(r+2, c));
 
                 int nextR = r + 3;
-                while (nextR < GameConfig::BOARD_ROWS && m_board[nextR][c].color == color) {
-                    matchSet.insert(QPoint(nextR, c));
-                    nextR++;
+                while (nextR < GameConfig::BOARD_ROWS) {
+                    Tile nextT = m_board[nextR][c];
+                    if (nextT.color == 0) break;
+
+                    if (isWildcard(nextT) || targetColor == -1 || nextT.color == targetColor) {
+                        matchSet.insert(QPoint(nextR, c));
+                        if (!isWildcard(nextT) && targetColor == -1) {
+                            targetColor = nextT.color;
+                        }
+                        nextR++;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -226,7 +324,6 @@ QSet<QPoint> GameLogic::findMatches() {
 
     return matchSet;
 }
-
 
 void GameLogic::refillBoard() {
     for (int r = 0; r < GameConfig::BOARD_ROWS; ++r) {
@@ -318,107 +415,6 @@ void GameLogic::endAndSaveGame(bool isWin) {
     emit gameOver(m_currentScore);
 }
 
-void GameLogic::processMatches(QPoint triggerPos, bool triggerRefill) {
-    qDebug() << ">>> [ProcessMatches] 启动！检查坐标: (" << triggerPos.x() << "," << triggerPos.y() << ")";
-
-    if (triggerPos.x() < 0 || triggerPos.x() >= m_rows || triggerPos.y() < 0 || triggerPos.y() >= m_cols) return;
-
-    int r = triggerPos.x();
-    int c = triggerPos.y();
-    int targetColor = m_board[r][c].color;
-    if (targetColor == 0) return;
-
-    // 1. 扫描匹配 (这部分保持不变)
-    std::vector<QPoint> horizontalMatches;
-    horizontalMatches.push_back(triggerPos);
-    for (int i = c - 1; i >= 0 && m_board[r][i].color == targetColor; --i) horizontalMatches.push_back(QPoint(r, i));
-    for (int i = c + 1; i < m_cols && m_board[r][i].color == targetColor; ++i) horizontalMatches.push_back(QPoint(r, i));
-
-    std::vector<QPoint> verticalMatches;
-    verticalMatches.push_back(triggerPos);
-    for (int i = r - 1; i >= 0 && m_board[i][c].color == targetColor; --i) verticalMatches.push_back(QPoint(i, c));
-    for (int i = r + 1; i < m_rows && m_board[i][c].color == targetColor; ++i) verticalMatches.push_back(QPoint(i, c));
-
-    bool isHMatch = horizontalMatches.size() >= 3;
-    bool isVMatch = verticalMatches.size() >= 3;
-
-    // 【核心约束】：如果不满三连，不产生新方块也不引爆旧方块
-    if (!isHMatch && !isVMatch) {
-        // 【关键新增】：如果玩家交换了方块但没有形成任何匹配，
-        // 说明这一回合结束了，需要重置连击。
-        // 但注意，如果是被连锁反应调用到的空点，不能重置。
-        // 通常玩家无效交换会在 swapTiles 里就被拦下来并退回，
-        // 所以这里直接 return 影响不大，重置连击的主要逻辑放在后面。
-        return;
-    }
-
-    // 2. 判定生成的特殊类型 (保持不变)
-    SpecialType generatedType = SpecialType::None;
-    if (horizontalMatches.size() >= 5 || verticalMatches.size() >= 5) generatedType = SpecialType::MagicBird;
-    else if (isHMatch && isVMatch) generatedType = SpecialType::Bomb;
-    else if (horizontalMatches.size() == 4) generatedType = SpecialType::LineHorizontal;
-    else if (verticalMatches.size() == 4) generatedType = SpecialType::LineVertical;
-
-    // 3. 收集点并处理连锁反应 (这部分保持不变)
-    QSet<QPoint> totalToRemove;
-    QList<QPoint> toProcess;
-
-    if (isHMatch) for (auto p : horizontalMatches) { totalToRemove.insert(p); toProcess.append(p); }
-    if (isVMatch) for (auto p : verticalMatches) { totalToRemove.insert(p); toProcess.append(p); }
-
-    int index = 0;
-    while(index < toProcess.size()){
-        QPoint p = toProcess.at(index++);
-        SpecialType sType = m_board[p.x()][p.y()].special;
-
-        if(sType != SpecialType::None){
-            emit specialEffectTriggered(p, sType);
-
-            QEventLoop loop;
-            QTimer::singleShot(250, &loop, &QEventLoop::quit);
-            loop.exec();
-
-            // 假设你有一个 triggerSpecialEffect 函数 (这里伪代码略过具体实现)
-            QSet<QPoint> affected = triggerSpecialEffect(p, sType);
-            for(const QPoint& ap : affected){
-                if(!totalToRemove.contains(ap)){
-                    totalToRemove.insert(ap);
-                    toProcess.append(ap);
-                }
-            }
-            m_board[p.x()][p.y()].special = SpecialType::None;
-        }
-    }
-
-    qDebug() << "    [消除]: 连击成功，消除点数 =" << totalToRemove.size();
-
-
-    // 4. 执行物理消除
-    for (const QPoint& pos : totalToRemove) {
-        if (generatedType != SpecialType::None && pos.x() == r && pos.y() == c) continue;
-
-        m_board[pos.x()][pos.y()].color = 0;
-        m_board[pos.x()][pos.y()].special = SpecialType::None;
-
-        // 【新增】：分数加上连击加成！比如基础 10 分，每次连击多 5 分
-        int baseScore = 10;
-        int comboBonus = (m_currentCombo > 1) ? (m_currentCombo - 1) * 5 : 0;
-        m_currentScore += (baseScore + comboBonus);
-    }
-
-    // 5. 写入新生成的特殊属性 (保持不变)
-    if (generatedType != SpecialType::None) {
-        m_board[r][c].color = (generatedType == SpecialType::MagicBird) ? 9 : targetColor;
-        m_board[r][c].special = generatedType;
-    }
-
-    emit scoreUpdated(m_currentScore);
-
-    // 根据传入的参数决定是否立即下落
-    if (triggerRefill) {
-        handleMatchesAndRefill(false);
-    }
-}
 
 void GameLogic::handleMatchesAndRefill(bool isFirstMatchInTurn) {
     bool hasNewMatches = true;
@@ -453,7 +449,197 @@ void GameLogic::handleMatchesAndRefill(bool isFirstMatchInTurn) {
         }
     }
 }
+void GameLogic::processMatches(QPoint triggerPos, bool triggerRefill) {
+    if (triggerPos.x() < 0 || triggerPos.x() >= m_rows || triggerPos.y() < 0 || triggerPos.y() >= m_cols) return;
 
+    int r = triggerPos.x();
+    int c = triggerPos.y();
+    if (m_board[r][c].color == 0) return; // 空方块跳过
+
+    auto isWildcard = [](const Tile& t) {
+        return t.special == SpecialType::Bomb ||
+               t.special == SpecialType::LineHorizontal ||
+               t.special == SpecialType::LineVertical;
+    };
+
+    // ==========================================
+    // 1. 横向扫描 (智能滑动窗口推导法)
+    // ==========================================
+    int hColor = -1;
+    bool hasHMatchWindow = false;
+    // 扫描包含当前方块的 3 个可能的 3 连窗口
+    for (int startC = c - 2; startC <= c; ++startC) {
+        if (startC < 0 || startC + 2 >= m_cols) continue;
+        Tile t1 = m_board[r][startC], t2 = m_board[r][startC+1], t3 = m_board[r][startC+2];
+        if (t1.color == 0 || t2.color == 0 || t3.color == 0) continue;
+
+        int tempColor = -1;
+        bool match = true;
+        Tile tiles[3] = {t1, t2, t3};
+        for(int i=0; i<3; i++) {
+            if(!isWildcard(tiles[i])) {
+                if(tempColor == -1) tempColor = tiles[i].color;
+                else if(tempColor != tiles[i].color) { match = false; break; }
+            }
+        }
+        if (match) {
+            hColor = tempColor;
+            hasHMatchWindow = true; // 确认存在消除！
+            break;
+        }
+    }
+
+    std::vector<QPoint> horizontalMatches;
+    if (hasHMatchWindow) {
+        horizontalMatches.push_back(triggerPos);
+        // 有了确定的 hColor，安全地向左收集
+        for (int i = c - 1; i >= 0; --i) {
+            Tile& t = m_board[r][i];
+            if (t.color == 0) break;
+            if (isWildcard(t) || hColor == -1 || t.color == hColor) {
+                horizontalMatches.push_back(QPoint(r, i));
+                if (!isWildcard(t) && hColor == -1) hColor = t.color; // 全赖子推导
+            } else break;
+        }
+        // 安全地向右收集
+        for (int i = c + 1; i < m_cols; ++i) {
+            Tile& t = m_board[r][i];
+            if (t.color == 0) break;
+            if (isWildcard(t) || hColor == -1 || t.color == hColor) {
+                horizontalMatches.push_back(QPoint(r, i));
+                if (!isWildcard(t) && hColor == -1) hColor = t.color;
+            } else break;
+        }
+    }
+
+    // ==========================================
+    // 2. 纵向扫描 (智能滑动窗口推导法)
+    // ==========================================
+    int vColor = -1;
+    bool hasVMatchWindow = false;
+    for (int startR = r - 2; startR <= r; ++startR) {
+        if (startR < 0 || startR + 2 >= m_rows) continue;
+        Tile t1 = m_board[startR][c], t2 = m_board[startR+1][c], t3 = m_board[startR+2][c];
+        if (t1.color == 0 || t2.color == 0 || t3.color == 0) continue;
+
+        int tempColor = -1;
+        bool match = true;
+        Tile tiles[3] = {t1, t2, t3};
+        for(int i=0; i<3; i++) {
+            if(!isWildcard(tiles[i])) {
+                if(tempColor == -1) tempColor = tiles[i].color;
+                else if(tempColor != tiles[i].color) { match = false; break; }
+            }
+        }
+        if (match) {
+            vColor = tempColor;
+            hasVMatchWindow = true;
+            break;
+        }
+    }
+
+    std::vector<QPoint> verticalMatches;
+    if (hasVMatchWindow) {
+        verticalMatches.push_back(triggerPos);
+        for (int i = r - 1; i >= 0; --i) {
+            Tile& t = m_board[i][c];
+            if (t.color == 0) break;
+            if (isWildcard(t) || vColor == -1 || t.color == vColor) {
+                verticalMatches.push_back(QPoint(i, c));
+                if (!isWildcard(t) && vColor == -1) vColor = t.color;
+            } else break;
+        }
+        for (int i = r + 1; i < m_rows; ++i) {
+            Tile& t = m_board[i][c];
+            if (t.color == 0) break;
+            if (isWildcard(t) || vColor == -1 || t.color == vColor) {
+                verticalMatches.push_back(QPoint(i, c));
+                if (!isWildcard(t) && vColor == -1) vColor = t.color;
+            } else break;
+        }
+    }
+
+    bool isHMatch = horizontalMatches.size() >= 3;
+    bool isVMatch = verticalMatches.size() >= 3;
+
+    // 【死循环终结者】：不满足三连，直接退出
+    if (!isHMatch && !isVMatch) return;
+
+    // ==========================================
+    // 3. 判定生成的特殊类型
+    // ==========================================
+    SpecialType generatedType = SpecialType::None;
+    if (horizontalMatches.size() >= 5 || verticalMatches.size() >= 5) generatedType = SpecialType::MagicBird;
+    else if (isHMatch && isVMatch) generatedType = SpecialType::Bomb;
+    else if (horizontalMatches.size() == 4) generatedType = SpecialType::LineHorizontal;
+    else if (verticalMatches.size() == 4) generatedType = SpecialType::LineVertical;
+
+    // ==========================================
+    // 4. 收集点并处理连锁反应 (特效引爆)
+    // ==========================================
+    QSet<QPoint> totalToRemove;
+    QList<QPoint> toProcess;
+
+    if (isHMatch) for (auto p : horizontalMatches) { totalToRemove.insert(p); toProcess.append(p); }
+    if (isVMatch) for (auto p : verticalMatches) { totalToRemove.insert(p); toProcess.append(p); }
+
+    int index = 0;
+    while(index < toProcess.size()){
+        QPoint p = toProcess.at(index++);
+        SpecialType sType = m_board[p.x()][p.y()].special;
+
+        if(sType != SpecialType::None){
+            emit specialEffectTriggered(p, sType);
+
+            // 让视觉效果跟上
+            QEventLoop loop;
+            QTimer::singleShot(200, &loop, &QEventLoop::quit);
+            loop.exec();
+
+            QSet<QPoint> affected = triggerSpecialEffect(p, sType);
+            for(const QPoint& ap : affected){
+                if(!totalToRemove.contains(ap)){
+                    totalToRemove.insert(ap);
+                    toProcess.append(ap);
+                }
+            }
+            m_board[p.x()][p.y()].special = SpecialType::None; // 防止重复引爆
+        }
+    }
+
+    // ==========================================
+    // 5. 执行物理消除与计分
+    // ==========================================
+    for (const QPoint& pos : totalToRemove) {
+        if (generatedType != SpecialType::None && pos.x() == r && pos.y() == c) continue;
+
+        m_board[pos.x()][pos.y()].color = 0;
+        m_board[pos.x()][pos.y()].special = SpecialType::None;
+
+        int baseScore = 10;
+        int comboBonus = (m_currentCombo > 1) ? (m_currentCombo - 1) * 5 : 0;
+        m_currentScore += (baseScore + comboBonus);
+    }
+
+    // ==========================================
+    // 6. 生成新的特殊方块
+    // ==========================================
+    if (generatedType != SpecialType::None) {
+        int finalColor = 9; // 魔力鸟专属底色
+        if (generatedType != SpecialType::MagicBird) {
+            finalColor = isHMatch ? hColor : vColor;
+            if (finalColor == -1) finalColor = (rand() % 5) + 1; // 全赖子消除的兜底
+        }
+        m_board[r][c].color = finalColor;
+        m_board[r][c].special = generatedType;
+    }
+
+    emit scoreUpdated(m_currentScore);
+
+    if (triggerRefill) {
+        handleMatchesAndRefill(false);
+    }
+}
 
 void GameLogic::applyGravity() {
     // 简单的下落逻辑：每一列从底向上扫描，将非空方块下压

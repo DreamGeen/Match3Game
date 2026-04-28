@@ -52,6 +52,8 @@ int main(int argc, char *argv[]) {
 
             // ===== 【新增】：监听返回大厅信号 =====
             QObject::connect(gameWin, &MainWindow::returnToLobbyRequested, [=]() {
+                lobbyWin->refreshScore(); // 👇【加上这行】：切回大厅前，强制刷新一次积分！
+
                 mainStage->setCurrentWidget(lobbyWin); // 切回大厅
                 mainStage->removeWidget(gameWin);      // 从舞台堆栈中移除当前关卡
                 gameWin->deleteLater();                // 释放掉游戏窗口的内存，防止越玩越卡

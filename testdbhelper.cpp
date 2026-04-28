@@ -24,8 +24,12 @@ void TestDBHelper::testRegister() {
 void TestDBHelper::testLogin() {
     qDebug() << ">>> 测试: 验证登录...";
     QString nickname;
+    // 👇【新增】：定义两个变量来接收新加的参数
+    int avatarId;
+    int totalScore;
 
-    bool isLoginSuccess = DBHelper::getInstance().login(testUser, testPwd, currentUid, nickname);
+    // 👇【修改】：把这 6 个参数完整地传给 login 函数
+    bool isLoginSuccess = DBHelper::getInstance().login(testUser, testPwd, currentUid, nickname, avatarId, totalScore);
 
     QVERIFY(isLoginSuccess); // 断言：登录必须成功
     QVERIFY(currentUid > 0); // 断言：必须成功获取到了合法的 UID
