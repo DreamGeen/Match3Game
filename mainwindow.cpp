@@ -6,6 +6,7 @@
 #include <QPropertyAnimation>
 #include <QParallelAnimationGroup>
 #include <QGraphicsDropShadowEffect>
+#include <QVariantAnimation>
 
 
 MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
@@ -189,16 +190,51 @@ void MainWindow::updateScoreLabel(int score) {
     double percent = qBound(0.0, (double)score / target, 1.0);
 
     // ==========================================
-    // 视觉特效 1：分数越高，中间面板的“黑雾”越淡
+    // 视觉特效 1：分数越高，中间面板的“黑雾”越淡 (加入平滑过渡动画版)
     // ==========================================
-    int dynamicAlpha = 120 - (int)(percent * 80); // 透明度从 120 逐渐降到 40
-    centralWidget()->findChild<QFrame*>("boardPanel")->setStyleSheet(
-        QString("#boardPanel { background-color: rgba(20, 20, 30, %1); border-radius: 15px; border: 2px solid rgba(255, 105, 180, 100); }")
-            .arg(dynamicAlpha)
-        );
+    int targetAlpha = 120 - (int)(percent * 80); // 计算目标透明度
+    QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
+
+    if (boardPanel) {
+        // 核心机制：查找是否已经有正在运行的透明度动画，有的话先停止，防止快速连击时画面闪烁
+        QVariantAnimation* oldAnim = boardPanel->findChild<QVariantAnimation*>("alphaAnim");
+        int currentAlpha = targetAlpha;
+
+        if (oldAnim) {
+            currentAlpha = oldAnim->currentValue().toInt(); // 从当前动画进行到的一半截断
+            oldAnim->stop();
+            oldAnim->deleteLater();
+        } else if (score == 0) {
+            // 如果没有正在播放的动画，且分数刚重置为0（说明刚进入新关卡），让它从通透(40)开始逐渐变暗
+            currentAlpha = 40;
+        }
+
+        // 创建新的过渡动画并挂载到 boardPanel 上
+        QVariantAnimation *alphaAnim = new QVariantAnimation(boardPanel);
+        alphaAnim->setObjectName("alphaAnim");
+
+        // 动画策略：新关卡变暗时时间长一点(800ms)更丝滑，平时得分变亮时快一点(150ms)跟随消除节奏
+        alphaAnim->setDuration(score == 0 ? 800 : 150);
+        alphaAnim->setStartValue(currentAlpha);
+        alphaAnim->setEndValue(targetAlpha);
+        alphaAnim->setEasingCurve(score == 0 ? QEasingCurve::InOutQuad : QEasingCurve::Linear);
+
+        // 绑定动画值到 QSS 样式表
+        connect(alphaAnim, &QVariantAnimation::valueChanged, [boardPanel](const QVariant &value){
+            int alpha = value.toInt();
+            boardPanel->setStyleSheet(
+                QString("#boardPanel { background-color: rgba(20, 20, 30, %1); border-radius: 15px; border: 2px solid rgba(255, 105, 180, 100); }")
+                    .arg(alpha)
+                );
+        });
+
+        // 动画结束自动释放内存
+        connect(alphaAnim, &QVariantAnimation::finished, alphaAnim, &QObject::deleteLater);
+        alphaAnim->start();
+    }
 
     // ==========================================
-    // 视觉特效 2：背景图从底部升起，作为主进度条
+    // 视觉特效 2：背景图从底部升起，作为主进度条 (保持原样)
     // ==========================================
     if (!m_scaledBg.isNull()) {
         int revealHeight = m_scaledBg.height() * percent;
@@ -213,7 +249,7 @@ void MainWindow::updateScoreLabel(int score) {
         }
     }
 
-    // 更新星星
+    // 更新星星 (保持原样)
     for (int i = 0; i < 3; ++i) {
         if (score >= m_starThresholds[i]) {
             // 换成实心的大星星 ★
