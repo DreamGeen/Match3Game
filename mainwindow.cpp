@@ -1,194 +1,306 @@
 #include "MainWindow.h"
-#include <QHBoxLayout> // 用于顶部状态栏的水平排布
-#include <QFrame> // 确保引入了 QFrame
+#include <QHBoxLayout>
+#include <QFrame>
 #include <QMessageBox>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
+#include <QParallelAnimationGroup>
+#include <QGraphicsDropShadowEffect>
 
-// 【修改点】：接收 GameMode mode
+
 MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
     : QMainWindow(parent), m_session(session), m_currentMode(mode)
 {
-    setWindowTitle("Bocchi Clear! - 摇滚消消乐");
+    setWindowTitle("Bocchi Clear! - 全国巡演模式");
 
-    // 1. 初始化逻辑层与舞台
     m_logic = new GameLogic(GameConfig::BOARD_ROWS, GameConfig::BOARD_COLS, this);
     m_gamePanel = new GamePanel(m_logic, this);
 
+    // ==========================================
+    // 关卡数据配置表：目标分数、步数限制、解锁美图
+    // ==========================================
+    m_levels = {
+        {800,  25, ":/res/backgrounds/level1.png"},
+        {3500,  25, ":/res/backgrounds/level2.png"},
+        {6000, 22, ":/res/backgrounds/level3.png"},
+        {10000, 20, ":/res/backgrounds/level4.png"},
+        {18000, 15, ":/res/backgrounds/level5.png"}
+    };
+
+    // 如果你暂时只有 stage_bg.png，可以取消下面这行的注释进行测试：
+    // for(auto& lvl : m_levels) lvl.bgPath = ":/res/backgrounds/stage_bg.png";
+
     setupUI();
-    initConnections(); // <-- 确保在这里调用
+    initConnections();
 
-    // 2. 启动游戏逻辑
-    // 【关键修改】：使用大厅传过来的 mode 启动游戏，而不是写死的 GameMode::Single
-    m_logic->startNewGame(m_session.uid, m_currentMode);
+    // 默认从第一关开始加载
+    loadLevel(0);
 
-    // 如果选择了人机对战模式，可以在这里或者 GameLogic 中触发 AI 相关的定时器
-    if (m_currentMode == GameMode::AI) {
-        // TODO: 启动 AI 定时器等操作
-        // 例如：m_logic->startAI();
-    }
-
-    // 3. 监听得分变化
+    // 连接逻辑层更新信号
     connect(m_logic, &GameLogic::scoreUpdated, this, &MainWindow::updateScoreLabel);
-
-    // 4. 连接连击信号
     connect(m_logic, &GameLogic::comboUpdated, this, &MainWindow::updateComboLabel);
 }
 
 void MainWindow::setupUI() {
     QWidget *centralWidget = new QWidget(this);
+    setCentralWidget(centralWidget);
     centralWidget->setObjectName("mainContainer");
-
-    // 【修改点1】：去掉重复的 stage_bg 背景图设置，因为底层的 QStackedWidget 已经有背景了
-    // 这里把 centralWidget 设置为全透明
     centralWidget->setStyleSheet("background: transparent;");
+
+    // === 1. 双层背景 ===
+    m_baseBgLabel = new QLabel(centralWidget);
+    m_bgRevealLabel = new QLabel(centralWidget);
+    m_baseBgLabel->lower();
 
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
 
-    // 【修改点2】：创建一个中央玻璃面板（游戏机台）
+    // === 2. 游戏主面板（改为浅色磨砂质感！） ===
     QFrame *boardPanel = new QFrame(centralWidget);
     boardPanel->setObjectName("boardPanel");
+    boardPanel->setFixedSize(820, 780); // 稍微加宽，给顶部留出充裕空间
 
-    // 设定一个固定大小，刚好能包住 640x640 的棋盘和顶部的计分板
-    boardPanel->setFixedSize(740, 780);
-
+    // 【视觉终极版】：高级暗黑高透玻璃（墨镜质感）
     boardPanel->setStyleSheet(R"(
         #boardPanel {
-            /* 【关键修改】：把最后的 210 改成 100，让它变透，露出背景灯光！ */
-            background-color: rgba(30, 30, 45, 100);
+            /* 使用存粹的黑色，透明度调到 80（大约30%不透明），就像一层高级汽车贴膜 */
+            background-color: rgba(0, 0, 0, 80);
             border-radius: 20px;
-            border: 2px solid rgba(255, 105, 180, 150); /* 稍微加亮一点粉色边框 */
+            /* 弃用粗边框，改为极细（1px）、极弱（透明度40）的白线，勾勒出面板边缘即可 */
+            border: 1px solid rgba(255, 255, 255, 40);
         }
-
-        QLabel {
-            color: white;
-            background-color: transparent;
-            font-family: "Microsoft YaHei", "Segoe UI";
-        }
-
-        QLabel#infoLabel {
-            font-size: 16px;
-            font-weight: bold;
-        }
-
-        QLabel#scoreLabel {
-            font-size: 22px;
-            font-weight: 900;
-            color: #ffb6c1;
-        }
+        QLabel { color: white; background: transparent; font-family: "Microsoft YaHei", "Segoe UI"; }
     )");
 
-
-    // 为面板内部创建一个垂直布局
     QVBoxLayout *panelLayout = new QVBoxLayout(boardPanel);
-    panelLayout->setContentsMargins(40, 30, 40, 30);
+    panelLayout->setContentsMargins(30, 30, 30, 30);
     panelLayout->setSpacing(20);
 
-    // --- 顶部状态栏排布 ---
-    QString modeStr = (m_currentMode == GameMode::Single) ? "单人" : (m_currentMode == GameMode::AI ? "人机" : "网络");
-    m_infoLabel = new QLabel(QString("🎸 乐手: %1 | 模式: %2 | 🏆 最高: %3")
-                                 .arg(m_session.nickname)
-                                 .arg(modeStr)
-                                 .arg(m_session.totalScore));
-    m_infoLabel->setObjectName("infoLabel");
+    // === 3. 高品质文字阴影（解决亮色背景看不清字的问题） ===
+    auto applyTextShadow = [](QWidget* widget) {
+        QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(widget);
+        shadow->setOffset(1, 2);                // 阴影向右下偏移
+        shadow->setBlurRadius(5);               // 阴影边缘微模糊
+        shadow->setColor(QColor(0, 0, 0, 220)); // 强烈的纯黑投影
+        widget->setGraphicsEffect(shadow);
+    };
+
+    // === 4. 顶部状态栏排布 ===
+    QHBoxLayout *topLayout = new QHBoxLayout();
+
+    QString modeStr = (m_currentMode == GameMode::Single) ? "单人" : "人机";
+    m_infoLabel = new QLabel(QString("🎸 %1 | %2").arg(m_session.nickname).arg(modeStr));
+    m_infoLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;");
+    applyTextShadow(m_infoLabel); // <--- 应用纯黑阴影
+
+    QHBoxLayout *targetLayout = new QHBoxLayout();
+    targetLayout->setSpacing(5);
+
+    m_levelTargetLabel = new QLabel("🎯 目标: 0");
+    // 【关键修复】：给目标分数锁定至少 160 的宽度，彻底防止它挤压、盖住星星！
+    m_levelTargetLabel->setMinimumWidth(160);
+    m_levelTargetLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700;");
+    applyTextShadow(m_levelTargetLabel);
+    targetLayout->addWidget(m_levelTargetLabel);
+
+    targetLayout->addSpacing(10); // 强行拉开一段距离
+
+    for (int i = 0; i < 3; ++i) {
+        m_starLabels[i] = new QLabel("☆");
+        m_starLabels[i]->setFixedSize(30, 30); // 给每个星星画死固定大小的格子，绝对不越界
+        m_starLabels[i]->setAlignment(Qt::AlignCenter);
+        m_starLabels[i]->setStyleSheet("font-size: 24px; color: rgba(255,255,255,200);");
+        applyTextShadow(m_starLabels[i]); // <--- 星星也加上阴影
+        targetLayout->addWidget(m_starLabels[i]);
+    }
+
+    m_movesLabel = new QLabel("⏳ 步数: 20");
+    m_movesLabel->setStyleSheet("font-size: 18px; color: #00FF7F; font-weight: bold;");
+    applyTextShadow(m_movesLabel);
 
     m_scoreLabel = new QLabel("🎵 当前得分: 0");
-    m_scoreLabel->setObjectName("scoreLabel");
+    m_scoreLabel->setStyleSheet("font-size: 18px; font-weight: 900; color: #ffb6c1;");
+    applyTextShadow(m_scoreLabel);
 
-    m_comboLabel = new QLabel("");
-    m_comboLabel->setObjectName("comboLabel");
-    m_comboLabel->setAlignment(Qt::AlignCenter);
-    m_comboLabel->hide();
-
-    // --- 【新增：初始化步数和目标标签】 ---
-    m_levelTargetLabel = new QLabel("🎯 目标: 500"); // 初始值，之后会通过信号更新
-    m_movesLabel = new QLabel("⏳ 步数: 20");
-    m_movesLabel->setStyleSheet("font-size: 20px; color: #00FF7F; font-weight: bold;");
-
-    // 水平组装顶部栏
-    QHBoxLayout *topLayout = new QHBoxLayout();
+    // 用 addStretch 撑开所有元素，均匀分布
     topLayout->addWidget(m_infoLabel);
     topLayout->addStretch();
-
-    // --- 【核心修改：把新控件加入布局】 ---
-    topLayout->addWidget(m_levelTargetLabel);
-    topLayout->addSpacing(20); // 增加一点间距
-    topLayout->addWidget(m_movesLabel);
+    topLayout->addLayout(targetLayout);
     topLayout->addStretch();
-    // ------------------------------------
-
-    topLayout->addWidget(m_comboLabel);
+    topLayout->addWidget(m_movesLabel);
     topLayout->addStretch();
     topLayout->addWidget(m_scoreLabel);
 
-
-
-    // 【核心组装】：把顶部栏和游戏棋盘装进玻璃面板里！
     panelLayout->addLayout(topLayout);
-    // 将 GamePanel 居中放入面板
     panelLayout->addWidget(m_gamePanel, 0, Qt::AlignHCenter);
 
-    // 【最外层排版】：将整个玻璃机台正居中放在全屏的主窗口里
     mainLayout->addWidget(boardPanel, 0, Qt::AlignCenter);
-
-    setCentralWidget(centralWidget);
 }
 
+void MainWindow::loadLevel(int index) {
+    if (index >= m_levels.size()) return;
+    m_currentLevelIndex = index;
+    LevelConfig cfg = m_levels[index];
+
+    m_starThresholds[0] = cfg.targetScore * 0.3;
+    m_starThresholds[1] = cfg.targetScore * 0.6;
+    m_starThresholds[2] = cfg.targetScore;
+
+    m_logic->startLevel(m_session.uid, m_currentMode, cfg.targetScore, cfg.maxMoves);
+
+    // === 【核心修复：背景传承逻辑】 ===
+    // 1. 设置底层背景（如果这是第一关，底层就是默认的舞台；如果是后续关卡，底层就是上一关解锁的图！）
+    if (index == 0) {
+        m_baseBgPixmap.load(":/res/backgrounds/stage_bg.png");
+    } else {
+        m_baseBgPixmap.load(m_levels[index - 1].bgPath);
+    }
+
+    // 2. 设置顶层的目标背景
+    m_targetBgPixmap.load(cfg.bgPath);
+
+    // 触发重绘缩放
+    QResizeEvent re(size(), size());
+    resizeEvent(&re);
+
+    m_levelTargetLabel->setText(QString("🎯 目标: %1").arg(cfg.targetScore));
+    updateScoreLabel(0);
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event) {
+    QMainWindow::resizeEvent(event);
+
+    // 1. 铺满底层背景
+    if (!m_baseBgPixmap.isNull()) {
+        m_baseBgLabel->setGeometry(0, 0, width(), height());
+        m_baseBgLabel->setPixmap(m_baseBgPixmap.scaled(size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+    }
+
+    // 2. 缩放顶层背景（准备被裁剪）
+    if (!m_targetBgPixmap.isNull()) {
+        m_scaledBg = m_targetBgPixmap.scaled(size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        updateScoreLabel(m_logic->getCurrentScore());
+    }
+}
 void MainWindow::updateScoreLabel(int score) {
-    // 保持 Emoji 符号，每次更新时重新拼接
     m_scoreLabel->setText(QString("🎵 当前得分: %1").arg(score));
+
+    int target = m_levels[m_currentLevelIndex].targetScore;
+    double percent = qBound(0.0, (double)score / target, 1.0);
+
+    // ==========================================
+    // 视觉特效 1：分数越高，中间面板的“黑雾”越淡
+    // ==========================================
+    int dynamicAlpha = 120 - (int)(percent * 80); // 透明度从 120 逐渐降到 40
+    centralWidget()->findChild<QFrame*>("boardPanel")->setStyleSheet(
+        QString("#boardPanel { background-color: rgba(20, 20, 30, %1); border-radius: 15px; border: 2px solid rgba(255, 105, 180, 100); }")
+            .arg(dynamicAlpha)
+        );
+
+    // ==========================================
+    // 视觉特效 2：背景图从底部升起，作为主进度条
+    // ==========================================
+    if (!m_scaledBg.isNull()) {
+        int revealHeight = m_scaledBg.height() * percent;
+        if (revealHeight > 0) {
+            // 切割出下半部分图像
+            QPixmap cropped = m_scaledBg.copy(0, m_scaledBg.height() - revealHeight, m_scaledBg.width(), revealHeight);
+            m_bgRevealLabel->setPixmap(cropped);
+            m_bgRevealLabel->setGeometry(0, this->height() - revealHeight, this->width(), revealHeight);
+            m_bgRevealLabel->show();
+        } else {
+            m_bgRevealLabel->hide();
+        }
+    }
+
+    // 更新星星
+    for (int i = 0; i < 3; ++i) {
+        if (score >= m_starThresholds[i]) {
+            // 换成实心的大星星 ★
+            m_starLabels[i]->setText("★");
+            m_starLabels[i]->setStyleSheet("font-size: 28px; color: #FFD700; background: transparent; font-weight: bold;");
+        } else {
+            m_starLabels[i]->setText("☆");
+            m_starLabels[i]->setStyleSheet("font-size: 24px; color: rgba(255,255,255,200); background: transparent;");
+        }
+    }
 }
 
 void MainWindow::updateComboLabel(int combo) {
-    // 连击数小于 2 时不显示
-    if (combo < 2) {
-        m_comboLabel->hide();
-        return;
-    }
+    if (combo < 2) return;
 
-    m_comboLabel->show();
-    // 更新文字内容，加上火焰 Emoji 增加燃点
-    m_comboLabel->setText(QString("🔥 %1 COMBO!").arg(combo));
+    QFrame* panel = centralWidget()->findChild<QFrame*>("boardPanel");
+    if (!panel) return;
 
-    // 使用 QVariantAnimation 动态改变 QSS 中的 font-size
-    QVariantAnimation *ani = new QVariantAnimation(this);
-    ani->setDuration(300); // 动画持续 300 毫秒
+    // 创建独立的标签用于动画
+    QLabel *comboText = new QLabel(QString("%1\nCOMBO!").arg(combo), centralWidget());
+    comboText->setAlignment(Qt::AlignCenter);
+    comboText->setStyleSheet(R"(
+        font-family: 'Impact', 'Arial Black', sans-serif;
+        font-size: 50px;
+        font-weight: 900;
+        font-style: italic;
+        color: #FFea00;
+        background: transparent;
+    )");
 
-    ani->setStartValue(20);      // 初始字号：20px
-    ani->setKeyValueAt(0.5, 40); // 关键帧（动画进行到一半时）：突然放大到 40px
-    ani->setEndValue(26);        // 结束字号：稳定在 26px
+    // 【特效调整】：在棋盘面板的左上角外部生成
+    int startX = panel->x() - 140 + (rand() % 40);
+    int startY = panel->y() + 50 + (rand() % 40);
+    comboText->setGeometry(startX, startY, 250, 150);
+    comboText->show();
 
-    // 每次数值变化时，重新应用样式表
-    connect(ani, &QVariantAnimation::valueChanged, [this](const QVariant &value) {
-        int fontSize = value.toInt();
-        // 专门为 Combo 设置的摇滚金配色，并且去掉背景黑框，让它看起来像悬浮特效
-        QString style = QString(
-                            "font-size: %1px; "
-                            "font-weight: 900; "
-                            "color: #FFD700; "             /* 耀眼的金色 */
-                            "background-color: transparent; "
-                            "border: none;"
-                            ).arg(fontSize);
+    QParallelAnimationGroup *group = new QParallelAnimationGroup(comboText);
 
-        m_comboLabel->setStyleSheet(style);
-    });
+    // 动画：向极左上方滑出
+    QPropertyAnimation *move = new QPropertyAnimation(comboText, "pos");
+    move->setDuration(1800);
+    move->setStartValue(QPoint(startX, startY));
+    move->setEndValue(QPoint(startX - 100, startY - 120));
+    move->setEasingCurve(QEasingCurve::OutExpo);
 
-    ani->start(QAbstractAnimation::DeleteWhenStopped);
+    // 动画：淡出消失，滞空时间加长
+    QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(comboText);
+    comboText->setGraphicsEffect(eff);
+    QPropertyAnimation *fade = new QPropertyAnimation(eff, "opacity");
+    fade->setDuration(1800);
+    fade->setStartValue(1.0);
+    fade->setKeyValueAt(0.7, 1.0); // 70%的时间内完全清晰
+    fade->setEndValue(0.0);
+
+    group->addAnimation(move);
+    group->addAnimation(fade);
+
+    // 动画播完自动销毁，防止内存溢出
+    connect(group, &QAnimationGroup::finished, comboText, &QObject::deleteLater);
+    group->start();
 }
 
-
-// 连接逻辑信号
 void MainWindow::initConnections() {
+    // 监听步数变动
     connect(m_logic, &GameLogic::movesUpdated, this, [this](int moves){
         m_movesLabel->setText(QString("⏳ 步数: %1").arg(moves));
-        if (moves <= 5) m_movesLabel->setStyleSheet("color: red; font-size: 24px;"); // 临急提示
+        if (moves <= 5) {
+            // 步数极少时爆红警告
+            m_movesLabel->setStyleSheet("font-size: 24px; color: #ff4500; font-weight: bold;");
+        } else {
+            // 正常为绿色
+            m_movesLabel->setStyleSheet("font-size: 20px; color: #00FF7F; font-weight: bold;");
+        }
     });
 
+    // 监听逻辑层的关卡结束判定
     connect(m_logic, &GameLogic::levelFinished, this, [this](bool isWin){
         if (isWin) {
-            QMessageBox::information(this, "Stage Clear", "🎸 精彩的演出！目标达成！");
+            if (m_currentLevelIndex < m_levels.size() - 1) {
+                QMessageBox::information(this, "Stage Clear", "🎸 演唱会大成功！全场沸腾！准备进入下一场演出！");
+                loadLevel(m_currentLevelIndex + 1); // 成功，自动加载下一关
+            } else {
+                QMessageBox::information(this, "All Clear", "🏆 恭喜！你已完成所有全国巡演！");
+            }
         } else {
-            QMessageBox::warning(this, "Game Over", "🎤 演出中断... 步数用完了。");
+            QMessageBox::warning(this, "Game Over", "🎤 演出中断... 步数用完了。没关系，再试一次！");
+            loadLevel(m_currentLevelIndex); // 失败，自动重开当前关卡
         }
-        // 返回大厅或重新开始逻辑
     });
 }

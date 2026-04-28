@@ -13,5 +13,10 @@
         <file>res/audio/select.wav</file>
         <file>res/backgrounds/stage_bg.png</file>
         <file>res/audio/bgm.wav</file>
+        <file>res/backgrounds/level1.png</file>
+        <file>res/backgrounds/level2.png</file>
+        <file>res/backgrounds/level3.png</file>
+        <file>res/backgrounds/level4.png</file>
+        <file>res/backgrounds/level5.png</file>
     </qresource>
 </RCC>

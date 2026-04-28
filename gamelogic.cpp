@@ -145,8 +145,9 @@ bool GameLogic::swapTiles(QPoint p1, QPoint p2) {
 
     // 3. 执行消除逻辑
     m_currentCombo = 1;
-    processMatches(p1);
-    processMatches(p2);
+    // 【核心修复】：必须传入 false，让两个交换点都结算完，再统一触发下落！
+    processMatches(p1, false);
+    processMatches(p2, false);
     handleMatchesAndRefill();
 
     // 4. 检查胜负状态
