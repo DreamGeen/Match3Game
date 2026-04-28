@@ -27,6 +27,7 @@ void GameLogic::startNewGame(int userId, GameMode mode) {
     m_currentMode = mode;
     m_currentScore = 0;
     m_startTime = QDateTime::currentDateTime();
+    m_hasReachedTarget = false; // 【新增】：新游戏重置状态
 
     // 初始化棋盘（防止初始三连）
     for(int r=0; r<m_rows; ++r) {
@@ -157,20 +158,24 @@ bool GameLogic::swapTiles(QPoint p1, QPoint p2) {
 }
 
 
+
+
+// 替换原有的 checkGameStatus
 void GameLogic::checkGameStatus() {
     if (m_isGameOver) return;
 
-    // 胜利判定：达到分数
-    if (m_currentScore >= m_targetScore) {
-        m_isGameOver = true;
-        endAndSaveGame(true); // 物理保存战绩
-        emit levelFinished(true);
+    // 1. 检查是否刚刚达到目标分数 (触发狂欢时间 MV)
+    if (!m_hasReachedTarget && m_currentScore >= m_targetScore) {
+        m_hasReachedTarget = true;
+        emit targetReached();
     }
-    // 失败判定：步数用尽且分数未达标
-    else if (m_remainingMoves <= 0) {
+
+    // 2. 真正的结束条件：无论分数多高，步数耗尽才结算！
+    if (m_remainingMoves <= 0) {
         m_isGameOver = true;
-        endAndSaveGame(false);
-        emit levelFinished(false);
+        bool isWin = (m_currentScore >= m_targetScore);
+        endAndSaveGame(isWin);
+        emit levelFinished(isWin); // 通知 UI 弹出漂亮的结果面板
     }
 }
 

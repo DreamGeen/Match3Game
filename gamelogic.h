@@ -40,6 +40,8 @@ signals:
     void movesUpdated(int remainingMoves); // 步数变化信号
     void levelFinished(bool isWin);        // 关卡结束信号
 
+    void targetReached(); // 目标达成，通知播放 MV
+
 private:
     // 核心算法模块
     void triggerTileEffect(int r, int c, std::set<std::pair<int, int>>& toRemove);
@@ -75,6 +77,7 @@ private:
     int m_remainingMoves = 0; // 剩余步数
     bool m_isGameOver = false;
 
+    bool m_hasReachedTarget = false; // 是否已经触发过目标达成
 
 
     // 内部状态

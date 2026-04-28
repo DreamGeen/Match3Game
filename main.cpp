@@ -35,16 +35,27 @@ int main(int argc, char *argv[]) {
     LoginWidget *loginWin = new LoginWidget();
     mainStage->addWidget(loginWin);
 
+
     // 4. 流程控制
     QObject::connect(loginWin, &LoginWidget::loginSuccess, [=](UserSession session) {
+        // 创建大厅
         LobbyWidget *lobbyWin = new LobbyWidget(session);
         mainStage->addWidget(lobbyWin);
         mainStage->setCurrentWidget(lobbyWin);
 
+        // 监听大厅的模式选择信号
         QObject::connect(lobbyWin, &LobbyWidget::modeSelected, [=](UserSession session, GameMode mode) {
+            // 创建游戏关卡
             MainWindow *gameWin = new MainWindow(session, mode);
             mainStage->addWidget(gameWin);
             mainStage->setCurrentWidget(gameWin);
+
+            // ===== 【新增】：监听返回大厅信号 =====
+            QObject::connect(gameWin, &MainWindow::returnToLobbyRequested, [=]() {
+                mainStage->setCurrentWidget(lobbyWin); // 切回大厅
+                mainStage->removeWidget(gameWin);      // 从舞台堆栈中移除当前关卡
+                gameWin->deleteLater();                // 释放掉游戏窗口的内存，防止越玩越卡
+            });
         });
     });
 

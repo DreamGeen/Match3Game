@@ -1,4 +1,4 @@
-QT       += core gui sql testlib network multimedia
+QT += core gui sql testlib network multimedia multimediawidgets
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
