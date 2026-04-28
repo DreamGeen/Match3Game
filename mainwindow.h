@@ -27,8 +27,11 @@ private:
     QLabel *m_scoreLabel;
     QLabel *m_infoLabel;
     QLabel *m_comboLabel;
+    QLabel *m_levelTargetLabel;
+    QLabel *m_movesLabel;
 
     void setupUI();
+    void initConnections();
 };
 
 #endif // MAINWINDOW_H

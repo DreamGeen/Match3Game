@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include <QHBoxLayout> // 用于顶部状态栏的水平排布
 #include <QFrame> // 确保引入了 QFrame
+#include <QMessageBox>
 
 // 【修改点】：接收 GameMode mode
 MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
@@ -13,6 +14,7 @@ MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
     m_gamePanel = new GamePanel(m_logic, this);
 
     setupUI();
+    initConnections(); // <-- 确保在这里调用
 
     // 2. 启动游戏逻辑
     // 【关键修改】：使用大厅传过来的 mode 启动游戏，而不是写死的 GameMode::Single
@@ -97,13 +99,28 @@ void MainWindow::setupUI() {
     m_comboLabel->setAlignment(Qt::AlignCenter);
     m_comboLabel->hide();
 
+    // --- 【新增：初始化步数和目标标签】 ---
+    m_levelTargetLabel = new QLabel("🎯 目标: 500"); // 初始值，之后会通过信号更新
+    m_movesLabel = new QLabel("⏳ 步数: 20");
+    m_movesLabel->setStyleSheet("font-size: 20px; color: #00FF7F; font-weight: bold;");
+
     // 水平组装顶部栏
     QHBoxLayout *topLayout = new QHBoxLayout();
     topLayout->addWidget(m_infoLabel);
     topLayout->addStretch();
+
+    // --- 【核心修改：把新控件加入布局】 ---
+    topLayout->addWidget(m_levelTargetLabel);
+    topLayout->addSpacing(20); // 增加一点间距
+    topLayout->addWidget(m_movesLabel);
+    topLayout->addStretch();
+    // ------------------------------------
+
     topLayout->addWidget(m_comboLabel);
     topLayout->addStretch();
     topLayout->addWidget(m_scoreLabel);
+
+
 
     // 【核心组装】：把顶部栏和游戏棋盘装进玻璃面板里！
     panelLayout->addLayout(topLayout);
@@ -156,4 +173,22 @@ void MainWindow::updateComboLabel(int combo) {
     });
 
     ani->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+
+// 连接逻辑信号
+void MainWindow::initConnections() {
+    connect(m_logic, &GameLogic::movesUpdated, this, [this](int moves){
+        m_movesLabel->setText(QString("⏳ 步数: %1").arg(moves));
+        if (moves <= 5) m_movesLabel->setStyleSheet("color: red; font-size: 24px;"); // 临急提示
+    });
+
+    connect(m_logic, &GameLogic::levelFinished, this, [this](bool isWin){
+        if (isWin) {
+            QMessageBox::information(this, "Stage Clear", "🎸 精彩的演出！目标达成！");
+        } else {
+            QMessageBox::warning(this, "Game Over", "🎤 演出中断... 步数用完了。");
+        }
+        // 返回大厅或重新开始逻辑
+    });
 }

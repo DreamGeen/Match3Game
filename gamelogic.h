@@ -14,6 +14,9 @@ class GameLogic : public QObject {
 public:
     explicit GameLogic(int rows = 8, int cols = 8, QObject *parent = nullptr);
 
+    // 更新后的启动函数：传入目标分数和限制步数
+    void startLevel(int userId, GameMode mode, int targetScore, int maxMoves);
+
     // 游戏控制
     void startNewGame(int userId, GameMode mode);
     void endAndSaveGame(bool isWin);
@@ -33,6 +36,9 @@ signals:
 
     // 【新增】：确保有这个信号
     void comboUpdated(int combo);
+
+    void movesUpdated(int remainingMoves); // 步数变化信号
+    void levelFinished(bool isWin);        // 关卡结束信号
 
 private:
     // 核心算法模块
@@ -61,6 +67,13 @@ private:
 
     // 【新增这一行】：声明处理下落和填充的函数，并给一个默认参数 true
     void handleMatchesAndRefill(bool isFirstMatchInTurn = true);
+
+    void checkGameStatus(); // 判定胜负的核心逻辑
+
+    // 关卡属性
+    int m_targetScore = 0;   // 目标分数
+    int m_remainingMoves = 0; // 剩余步数
+    bool m_isGameOver = false;
 
 
 

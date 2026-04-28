@@ -9,6 +9,19 @@ GameLogic::GameLogic(int rows, int cols, QObject *parent)
     m_board.resize(rows, std::vector<Tile>(cols));
 }
 
+
+void GameLogic::startLevel(int userId, GameMode mode, int targetScore, int maxMoves) {
+    m_targetScore = targetScore;
+    m_remainingMoves = maxMoves;
+    m_isGameOver = false;
+
+    // 调用原有的初始化棋盘逻辑
+    startNewGame(userId, mode);
+
+    emit movesUpdated(m_remainingMoves);
+}
+
+
 void GameLogic::startNewGame(int userId, GameMode mode) {
     m_currentUserId = userId;
     m_currentMode = mode;
@@ -28,6 +41,9 @@ void GameLogic::startNewGame(int userId, GameMode mode) {
     }
     emit boardChanged();
 }
+
+
+
 
 void GameLogic::removeMatches(const QSet<QPoint>& matches) {
     QSet<QPoint> totalMatches = matches; // 最终要消除的所有点
@@ -111,53 +127,51 @@ QSet<QPoint> GameLogic::triggerSpecialEffect(QPoint pos, SpecialType type) {
 
 
 bool GameLogic::swapTiles(QPoint p1, QPoint p2) {
-    // 1. 检查特殊组合 (比如两个炸弹互换)
-    if(checkSpecialCombo(p1, p2)){
-        // 【新增】：玩家主动触发特殊组合成功，新回合开始！重置连击。
-        m_currentCombo = 0;
-        emit comboUpdated(m_currentCombo);
+    if (m_isGameOver || m_remainingMoves <= 0) return false;
 
-        processMatches(p1);
-
-        // 💡 提示：如果你的 processMatches() 函数末尾已经调用了 handleMatchesAndRefill()，
-        // 这里的 handleMatchesAndRefill() 就可以删掉，防止重复执行下落逻辑。
-        handleMatchesAndRefill();
-        return true;
-    }
-
-    // 2. 内存虚拟交换
+    // 1. 执行虚拟交换并检查匹配
     std::swap(m_board[p1.x()][p1.y()], m_board[p2.x()][p2.y()]);
-
-    // 3. 扫描全图看是否有匹配
     QSet<QPoint> matches = findMatches();
 
     if (matches.isEmpty()) {
-        // --- 失败路径：回滚 ---
+        // 失败回滚
         std::swap(m_board[p1.x()][p1.y()], m_board[p2.x()][p2.y()]);
-        // 交换失败，回合没有进行，不重置连击数
         return false;
     }
 
-    // --- 成功路径 ---
+    // 2. 核心修改：交换成功扣除步数
+    m_remainingMoves--;
+    emit movesUpdated(m_remainingMoves);
 
-    // --- 成功路径 ---
-    // ✅ 【修改】：玩家主动交换成功，记为第 1 连击（Wave 1）
+    // 3. 执行消除逻辑
     m_currentCombo = 1;
-    // 如果你不想在第一次消除就显示 1 Combo，UI 层我们已经写了 combo < 2 时隐藏
-    emit comboUpdated(m_currentCombo);
-
-
-    // 【核心修复】：不要直接调用 removeMatches，而是调用你那个带监控的 processMatches
-    // 为什么要调两次？因为 p1 凑成的 4 连和 p2 凑成的 4 连都要判定
     processMatches(p1);
     processMatches(p2);
+    handleMatchesAndRefill();
 
-    // 注意：handleMatchesAndRefill 内部已经包含了 emit boardChanged 和下落逻辑
-    // 所以这里不需要再写 removeMatches 了
+    // 4. 检查胜负状态
+    checkGameStatus();
 
     return true;
 }
 
+
+void GameLogic::checkGameStatus() {
+    if (m_isGameOver) return;
+
+    // 胜利判定：达到分数
+    if (m_currentScore >= m_targetScore) {
+        m_isGameOver = true;
+        endAndSaveGame(true); // 物理保存战绩
+        emit levelFinished(true);
+    }
+    // 失败判定：步数用尽且分数未达标
+    else if (m_remainingMoves <= 0) {
+        m_isGameOver = true;
+        endAndSaveGame(false);
+        emit levelFinished(false);
+    }
+}
 
 QSet<QPoint> GameLogic::findMatches() {
     QSet<QPoint> matchSet;
