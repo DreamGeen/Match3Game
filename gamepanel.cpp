@@ -13,20 +13,42 @@ GamePanel::GamePanel(GameLogic *logic, QWidget *parent)
     setFixedSize(GameConfig::BOARD_COLS * GameConfig::TILE_SIZE,
                  GameConfig::BOARD_ROWS * GameConfig::TILE_SIZE);
 
-
     initPanel();
 
     // 让 GamePanel 背景全透明，露出底下的主窗口背景
     this->setAttribute(Qt::WA_TranslucentBackground);
 
-    // 绑定逻辑层信号
+    // ================= 原有信号绑定 =================
     connect(m_logic, &GameLogic::boardChanged, this, &GamePanel::onBoardChanged);
+    connect(m_logic, &GameLogic::specialEffectTriggered, this, &GamePanel::onSpecialEffectTriggered);
 
     initAudio();
 
-    // 确保有这一行！没有它，信号发出来也会消散在空气中
-    connect(m_logic, &GameLogic::specialEffectTriggered,
-            this, &GamePanel::onSpecialEffectTriggered);
+    // ===============================================
+    // 👇 【新增】：绑定新引擎的核心信号，接管所有动画与反馈
+    // ===============================================
+
+    // 1. 监听【无效交换】信号：触发退回动画
+    connect(m_logic, &GameLogic::invalidSwap, this, [=](QPoint p1, QPoint p2){
+        // 调用你刚刚改好的动画函数，isBack 设为 true 让方块弹回去
+        performSwapAnimation(p1, p2, true);
+    });
+
+    // 2. 监听【方块爆炸】信号：播放音效和特效
+    connect(m_logic, &GameLogic::boardExploded, this, [=](QSet<QPoint> killList){
+        // 消除成功！播放吉他扫弦音效
+        if (m_matchSound) {
+            m_matchSound->play();
+        }
+        // （未来如果你想加爆炸粒子特效，可以遍历 killList 里的坐标，在这里生成特效动画）
+    });
+
+    // 3. 监听【回合结束】信号：解除锁定，推进游戏流程
+    connect(m_logic, &GameLogic::turnEnded, this, [=](){
+        // 无论连击了多少次，引擎现在彻底安静了
+        m_isAnimating = false; // 解除 UI 动画锁定，允许玩家再次拖拽
+        emit actionFinished(); // 发送操作结束信号（通知 AI 可以思考下一步了）
+    });
 }
 
 
@@ -113,30 +135,24 @@ void GamePanel::performSwapAnimation(QPoint p1, QPoint p2, bool isBack) {
     group->addAnimation(a2);
 
     connect(group, &QAnimationGroup::finished, [=]() {
-        // 物理指针交换
+        // UI 物理指针交换
         std::swap(m_blocks[p1.x()][p1.y()], m_blocks[p2.x()][p2.y()]);
 
         if (!isBack) {
-            // 调用 GameLogic 判定是否能消除
-            if (!m_logic->swapTiles(p1, p2)) {
-                // 如果不能消除，自动播放“换回来”的动画
-                performSwapAnimation(p1, p2, true);
-            }else{
-                // 【新增】：消除成功，播放吉他扫弦
-                m_matchSound->play();
-                emit actionFinished(); // 【新增】操作成功，通知AI继续
-            }
-        }else {
-          emit actionFinished(); // 【新增】AI没消成换回去了，回合也算结束
+            // 👇 修改：不要判断返回值，直接把操作丢给后端引擎处理！
+            // 引擎处理完会自己发射信号来决定下一步动画。
+            m_logic->handleSwap(p1, p2);
+        } else {
+            // 如果是“退回动画”播完了，说明一次无效交换彻底结束
+            m_isAnimating = false;
+            emit actionFinished(); // 通知 AI 没消成，可以继续算下一步了
         }
 
-        m_isAnimating = false;
         group->deleteLater();
     });
 
     group->start();
 }
-
 
 void GamePanel::onBoardChanged() {
     // 当逻辑层发生消除或下落后，同步 UI 数据

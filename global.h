@@ -21,9 +21,9 @@ struct UserSession {
 
 // 在 Global.h 中添加
 enum class AIDifficulty {
-    Easy = 0,    // 呆萌：思考 3.0秒
-    Normal = 1,  // 普通：思考 2.0秒
-    Hard = 2     // 疯狂：思考 0.8秒
+    Easy = 0,    // 呆萌：思考 2.5秒
+    Normal = 1,  // 普通：思考 1.8秒
+    Hard = 2     // 疯狂：思考 0.6秒
 };
 
 #endif

@@ -8,6 +8,7 @@
 #include "GameElement.h"
 #include "DBHelper.h"
 #include "Global.h"
+#include <QQueue> // 记得加上队列头文件
 
 class GameLogic : public QObject {
     Q_OBJECT
@@ -43,8 +44,14 @@ public:
 
     void setRemainingMoves(int moves); // 强制修改剩余步数
 
+    bool hasValidMoves(); // 检查是否有可行的移动
+    void shuffleBoard();  // 打乱棋盘
+
+
+    // 玩家或 AI 交换方块的统一入口
+    void handleSwap(QPoint p1, QPoint p2);
+
 signals:
-    void boardChanged();
     void scoreUpdated(int newScore);
     void specialEffectTriggered(QPoint pos, SpecialType type);
     void gameOver(int finalScore);
@@ -56,20 +63,34 @@ signals:
     void levelFinished(bool isWin);        // 关卡结束信号
 
     void targetReached(); // 目标达成，通知播放 MV
-
-
     void aiMoveDecided(QPoint p1, QPoint p2); // AI算好的坐标
+
+    // 👇 添加这行：声明无效交换信号
+    void invalidSwap(QPoint p1, QPoint p2);
+    // 👇 顺便检查一下，确保我们在新代码里 emit 的这几个信号也都声明了：
+    void boardExploded(QSet<QPoint> killList); // 通知UI哪些方块爆炸了
+    void boardChanged();                       // 通知UI盘面发生了改变（比如掉落、洗牌）
+    void turnEnded();                          // 通知大厅回合结束（可以触发AI了）
 
 private:
     // 核心算法模块
-    void triggerTileEffect(int r, int c, std::set<std::pair<int, int>>& toRemove);
+
+    // 流水线引擎的核心三剑客
+    QSet<QPoint> expandKillList(QSet<QPoint> initialKillList);
+    void executeElimination(QSet<QPoint> rawKillList, QPoint activePoint);
+    SpecialType determineNewSpecial(const QSet<QPoint>& matchSet);
+
+    // 基础的重力下落与补充新方块（保留你原有的填充逻辑，稍作修改）
+    void applyGravityAndRefill();
+
+
     bool checkSpecialCombo(QPoint p1, QPoint p2); // 处理 5+5 等强力组合
-    void applyGravity(); // 消除后的下落逻辑
+
 
     // --- 新增声明：解决报错的核心 ---
     QSet<QPoint> findMatches();          // 补全的横纵向扫描算法
 
-    void removeMatches(const QSet<QPoint>& matches);
+
 
     void refillBoard(); // 随机生成新的波奇/虹夏方块
 
@@ -82,13 +103,12 @@ private:
     // ... 其他私有变量 ...
     int m_currentCombo = 0; // 【新增】：记录当前连击数
 
-    // 我们还需要调整一下 handleMatchesAndRefill 的签名，
-    // 让它能知道当前是不是由玩家点击触发的第一波消除。
-    // 注意：默认值 = true 只能写在 .h 头文件里
-    void processMatches(QPoint triggerPos, bool triggerRefill = true);
+    // void triggerTileEffect(int r, int c, std::set<std::pair<int, int>>& toRemove);
+    // void processMatches(QPoint triggerPos, bool triggerRefill = true);
+    // void handleMatchesAndRefill(bool isFirstMatchInTurn = true);// 连击逻辑我们将用新的引擎替代
+    // void removeMatches(const QSet<QPoint>& matches);
 
-    // 【新增这一行】：声明处理下落和填充的函数，并给一个默认参数 true
-    void handleMatchesAndRefill(bool isFirstMatchInTurn = true);
+
 
     void checkGameStatus(); // 判定胜负的核心逻辑
 

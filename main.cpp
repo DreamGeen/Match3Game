@@ -43,10 +43,11 @@ int main(int argc, char *argv[]) {
         mainStage->addWidget(lobbyWin);
         mainStage->setCurrentWidget(lobbyWin);
 
+        // 👇 【关键修改】：Lambda 中增加 AIDifficulty diff 参数
         // 监听大厅的模式选择信号
-        QObject::connect(lobbyWin, &LobbyWidget::modeSelected, [=](UserSession session, GameMode mode) {
+        QObject::connect(lobbyWin, &LobbyWidget::modeSelected, [=](UserSession session, GameMode mode,AIDifficulty diff) {
             // 创建游戏关卡
-            MainWindow *gameWin = new MainWindow(session, mode);
+            MainWindow *gameWin = new MainWindow(session, mode,diff);
             mainStage->addWidget(gameWin);
             mainStage->setCurrentWidget(gameWin);
 

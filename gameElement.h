@@ -28,15 +28,14 @@ namespace GameConfig {
 const int TILE_SIZE = 80;   // 单个方块像素大小
 const int BOARD_ROWS = 8;
 const int BOARD_COLS = 8;
+const int COLOR_COUNT = 5;  // 👈 添加这一行：代表共有5种基础颜色
 }
 
 // 为 QPoint 实现哈希函数
 // 这个函数会将 x 和 y 坐标通过位运算组合成一个唯一的 ID
 inline uint qHash(const QPoint &key, uint seed = 0) {
-    // 经典的哈希组合算法：将 x 和 y 异或并移位
-    // 这样即便坐标交换（如 1,2 和 2,1），生成的哈希值通常也会不同
-    return qHash(key.x(), seed) ^ qHash(key.y(), seed);
+    // 将 x 左移 16 位后与 y 进行按位或运算，完美避免对称坐标的哈希冲突
+    return qHash((key.x() << 16) | (key.y() & 0xFFFF), seed);
 }
-
 
 #endif

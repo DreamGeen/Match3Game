@@ -26,9 +26,9 @@ MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff, QW
     // 【新增】如果是AI模式，初始化AI组件并开启托管
     if (m_currentMode == GameMode::AI) {
         // 根据难度设置 AI 的“手速”
-        if (diff == AIDifficulty::Easy) m_aiDelay = 3000;
-        else if (diff == AIDifficulty::Hard) m_aiDelay = 800;
-        else m_aiDelay = 2000;
+        if (diff == AIDifficulty::Easy) m_aiDelay = 2500;
+        else if (diff == AIDifficulty::Hard) m_aiDelay = 600;
+        else m_aiDelay = 1800;
 
         m_aiLogic = new GameLogic(GameConfig::BOARD_ROWS, GameConfig::BOARD_COLS, this);
 
