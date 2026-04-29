@@ -15,13 +15,19 @@
 #include "GamePanel.h"
 #include "Global.h"
 #include "BattleBoardWidget.h"
+#include "networkmanager.h" // 确保包含了网络管理类
 
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    // 增加 AIDifficulty 参数
-    explicit  MainWindow(UserSession session, GameMode mode, AIDifficulty diff = AIDifficulty::Normal, QWidget *parent = nullptr);
+    // 👇 修改构造函数，增加 isHost 和 targetIp，并给默认值防止报错
+    explicit MainWindow(UserSession session,
+                        GameMode mode,
+                        AIDifficulty diff = AIDifficulty::Normal,
+                        bool isHost = false,           // 👈 新增
+                        QString targetIp = "",         // 👈 新增
+                        QWidget *parent = nullptr);
 
 protected:
     // 重写 resizeEvent，用于全屏动态背景缩放自适应
@@ -115,6 +121,16 @@ private:
     int m_aiDelay = 2000; // AI 思考延迟
 
 
+    void initOnlineConnections();
+
+    void startGameWithSeed(quint32 seed, const QString &name); // 👈 增加参数
+    bool m_isHost;           // 👈 记录当前身份
+    QString m_targetIp;      // 👈 记录要连接的IP
+
+    NetworkManager *m_netManager; // 网络管理器
+
+
+    QLabel *m_aiInfoLabel; // 👈 新增：用于动态修改对手的名字
 
 };
 

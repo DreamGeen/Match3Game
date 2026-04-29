@@ -14,8 +14,8 @@
 #include <QRandomGenerator>
 
 
-MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff, QWidget *parent)
-    : QMainWindow(parent), m_session(session), m_currentMode(mode)
+MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff,bool isHost, QString targetIp ,QWidget *parent)
+    : QMainWindow(parent), m_session(session), m_currentMode(mode),m_isHost(isHost),m_targetIp(targetIp)
 {
     setWindowTitle("Bocchi Clear! - 全国巡演模式");
 
@@ -39,6 +39,30 @@ MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff, QW
         m_aiPanel->setInteractive(false); // 封锁AI面板的鼠标点击
     }
 
+
+    // 👇 处理网络模式的启动逻辑
+    if (m_currentMode == GameMode::Online) {
+        m_netManager = new NetworkManager(this);
+
+        if (m_isHost) {
+            // 我是房主：使用当前玩家的昵称建房，监听 8888 端口
+            QString roomName = m_session.username + " 的Livehouse";
+            m_netManager->hostGame(roomName, 8888);
+        } else {
+            // 我是客机：连接到传进来的目标 IP
+            m_netManager->joinGame(m_targetIp, 8888);
+        }
+
+        // 复用 AI 的双面板 UI，并初始化网络信号绑定
+        m_aiLogic = new GameLogic(GameConfig::BOARD_ROWS, GameConfig::BOARD_COLS, this);
+        m_aiLogic->setBotMode(true);
+        m_aiPanel = new GamePanel(m_aiLogic, this);
+        m_aiPanel->setInteractive(false);
+
+        setupAIBattleUI(centralWidget());
+        initOnlineConnections(); // 你之前写好的同步坐标和种子的函数
+    }
+
     // ==========================================
     // 关卡数据配置表：加入物理磁盘路径下的 MV 视频
     // ==========================================
@@ -58,15 +82,16 @@ MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff, QW
     setupResultPanel(); // 原样保留
     initConnections();  // 这里处理了胜负结算逻辑分流
 
+    // 找到这段代码，修改为：
     // 根据模式决定初始关卡
     if (m_currentMode == GameMode::AI) {
-        // AI对战：在现有配置的关卡数量中随机抽取一关
         int randomIndex = QRandomGenerator::global()->bounded(m_levels.size());
         loadLevel(randomIndex);
-    } else {
-        // 单人闯关：依然老老实实从第 0 关（第一关）开始打
+    } else if (m_currentMode == GameMode::Single) { // 👇 关键修复 2：改成 else if
         loadLevel(0);
     }
+    // 💡 重点：如果是 GameMode::Online，这里什么都不要做！
+    // 两边的黑框框会静静地等待。直到网络连通，调用 startGameWithSeed() 时，才会正式开始掉落方块！
 
     // 连接逻辑层更新信号
     connect(m_logic, &GameLogic::scoreUpdated, this, &MainWindow::updateScoreLabel);
@@ -87,7 +112,7 @@ void MainWindow::setupUI() {
 
     if (m_currentMode == GameMode::Single) {
         setupSinglePlayerUI(centralWidget);
-    } else if (m_currentMode == GameMode::AI) {
+    } else if (m_currentMode == GameMode::AI|| m_currentMode == GameMode::Online) {
         setupAIBattleUI(centralWidget);
     }
 }
@@ -263,15 +288,18 @@ void MainWindow::setupAIBattleUI(QWidget *centralWidget) {
     aLayout->setSpacing(20);
 
     QHBoxLayout *aTop = new QHBoxLayout();
-    QLabel *aiInfo = new QLabel("🤖 强力机器");
-    aiInfo->setStyleSheet("font-size: 18px; font-weight: bold; color: #00FFFF;");
-    applyTextShadow(aiInfo);
+    //QLabel *aiInfo = new QLabel("🤖 强力机器");
+    // 👈 修改这行：不再使用局部变量 QLabel *aiInfo，而是赋值给成员变量 m_aiInfoLabel
+    QString defaultName = (m_currentMode == GameMode::Online) ? "等待对手..." : "🤖 强力机器";
+    m_aiInfoLabel = new QLabel(defaultName);
+    m_aiInfoLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #00FFFF;");
+    applyTextShadow(m_aiInfoLabel);
 
     m_aiScoreLabel = new QLabel("🎵 得分: 0");
     m_aiScoreLabel->setStyleSheet("font-size: 18px; font-weight: 900; color: #ffb6c1;");
     applyTextShadow(m_aiScoreLabel);
 
-    aTop->addWidget(aiInfo);
+    aTop->addWidget(m_aiInfoLabel);
     aTop->addStretch();
     aTop->addWidget(m_aiScoreLabel);
 
@@ -773,4 +801,81 @@ void MainWindow::onReturnClicked() {
         bgm->play();
     }
     emit returnToLobbyRequested(); // 通知主程序切回大厅
+}
+
+
+// ==============================================================
+// 🌐 网络对战专属逻辑实现部分
+// ==============================================================
+
+void MainWindow::initOnlineConnections() {
+    if (!m_netManager) return;
+
+    // 1. 联机成功后，房主负责发牌（生成种子并发送）
+    connect(m_netManager, &NetworkManager::connectedToOpponent, this, [this](){
+        if (m_netManager->isHost()) {
+            quint32 seed = QDateTime::currentMSecsSinceEpoch(); // 取时间戳做种子
+            // 发送我的昵称给对方
+            m_netManager->sendGameStart(seed, m_session.nickname);
+            // 房主本地显示名暂时不用改（因为右边本来就是等对方），或者直接设为"等待中"
+            startGameWithSeed(seed, "连接中...");
+        }
+    });
+
+    // 2. 客机接收到房主的开局指令
+    connect(m_netManager, &NetworkManager::gameStartReceived, this, [this](quint32 seed, QString opponentName){
+        // 关键：在这里拿到了对方的真名！
+        startGameWithSeed(seed, opponentName);
+
+        // 如果我是客机，我还没给房主发过我的名字，这里可以补发一个确认包或者让房主也监听 scoreUpdate
+        // 简单做法：客机连上后也回发一个包含自己名字的 start 包（此时种子不重要）
+        if (!m_isHost) {
+            m_netManager->sendGameStart(0, m_session.nickname);
+        }
+    });
+
+    // 3. 我方操作同步给对方
+    // 监听本地逻辑的交换信号，发送给网络（注：如果GameLogic还没写 playerSwapped 信号，需要去补上）
+    connect(m_logic, &GameLogic::playerSwapped, this, [this](QPoint p1, QPoint p2){
+        m_netManager->sendSwapAction(p1, p2);
+    });
+
+    // 我方分数同步给对方
+    connect(m_logic, &GameLogic::scoreUpdated, this, [this](int score){
+        m_netManager->sendScoreUpdate(score);
+    });
+
+    // 4. 接收对方的操作，让右侧（对手）面板动起来
+    connect(m_netManager, &NetworkManager::opponentSwapped, this, [this](QPoint p1, QPoint p2){
+        if(m_aiPanel) {
+            // 复用你写好的 AI 面板走步函数
+            m_aiPanel->onAiMoveDecided(p1, p2);
+        }
+    });
+
+    // 接收对方的分数更新
+    connect(m_netManager, &NetworkManager::opponentScoreUpdated, this, [this](int score){
+        if(m_aiScoreLabel) { // 假设你右侧面板的计分板叫 m_aiScoreLabel
+            m_aiScoreLabel->setText(QString("🎵 对手得分: %1").arg(score));
+        }
+    });
+}
+
+void MainWindow::startGameWithSeed(quint32 seed, const QString &name) {
+    // 1. 更新 UI 上的对手名字
+    if (m_aiInfoLabel) {
+        m_aiInfoLabel->setText("🌐 " + name);
+    }
+
+    // 2. 如果收到有效的种子（不为0），则同步棋盘并开局
+    if (seed != 0) {
+        // 给自己的逻辑层和对手的镜像逻辑层设置相同的种子
+        m_logic->setRandomSeed(seed);
+        m_aiLogic->setRandomSeed(seed);
+
+        // 调用你现有的加载关卡函数
+        loadLevel(m_currentLevelIndex);
+
+        qDebug() << ">>> 联机对战正式开始，随机数种子：" << seed;
+    }
 }

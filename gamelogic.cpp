@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <QEventLoop>
 #include <QTimer>
-#include <QRandomGenerator>
 #include <QTimer>
 #include <QQueue> // 确保你的 cpp 文件顶部包含了队列头文件
 
@@ -31,6 +30,13 @@ void GameLogic::startNewGame(int userId, GameMode mode) {
     m_currentScore = 0;
     m_startTime = QDateTime::currentDateTime();
     m_hasReachedTarget = false; // 【新增】：新游戏重置状态
+
+
+    // 👇 新增：如果是单机或 AI 模式，开局时自动给一个随机种子，防止盘面重复
+    if (mode != GameMode::Online) {
+        m_random = QRandomGenerator::securelySeeded();
+    }
+
 
     // 初始化棋盘（防止初始三连）
     for(int r=0; r<m_rows; ++r) {
@@ -83,6 +89,14 @@ void GameLogic::handleSwap(QPoint p1, QPoint p2) {
         emit invalidSwap(p1, p2);
         return;
     }
+
+    // ==========================================================
+    // 🌐 👇 加上这三行：既然交换是合法的，发送网络同步信号！
+    // ==========================================================
+    if (!m_isBot) { // 只有玩家自己的面板才发信号，防止右侧的对手面板陷入死循环
+        emit playerSwapped(p1, p2);
+    }
+
 
     // 👇 2. 补回：既然交换是合法的，扣减步数，并重置连击数！
     m_remainingMoves--;
@@ -250,8 +264,8 @@ void GameLogic::applyGravityAndRefill() {
         for (int c = 0; c < m_cols; ++c) {
             // ⬇️ 修改判断条件：只对真正的空方块进行填充
             if (m_board[r][c].isEmpty()) {
-                // 使用之前建议的 QRandomGenerator
-                m_board[r][c].color = QRandomGenerator::global()->bounded(1, GameConfig::COLOR_COUNT + 1);
+                // 👇 修改：使用 m_random 替换掉 QRandomGenerator::global()
+                m_board[r][c].color = m_random.bounded(1, GameConfig::COLOR_COUNT + 1);
                 m_board[r][c].special = SpecialType::None;
             }
         }
@@ -402,12 +416,9 @@ void GameLogic::refillBoard() {
     for (int r = 0; r < GameConfig::BOARD_ROWS; ++r) {
         for (int c = 0; c < GameConfig::BOARD_COLS; ++c) {
             if (m_board[r][c].color == 0) {
-                // 随机填充波奇、虹夏等角色颜色
-               m_board[r][c].color = QRandomGenerator::global()->bounded(1, 6);
-
-                // 【核心修复】：使用你定义的 SpecialType::None
+                // 👇 修改：使用 m_random 替换掉 QRandomGenerator::global()
+                m_board[r][c].color = m_random.bounded(1, 6);
                 m_board[r][c].special = SpecialType::None;
-
                 m_board[r][c].isMatched = false;
             }
         }
@@ -558,12 +569,14 @@ void GameLogic::triggerNextBotMove() {
         // ---------------------------------------------------------
         if (m_aiDifficulty == AIDifficulty::Easy) {
             // 呆萌模式：完全随机选一个合法的步子
-            idx = QRandomGenerator::global()->bounded(static_cast<int>(moves.size()));
+            // 👇 修改：替换 global()
+            idx = m_random.bounded(static_cast<int>(moves.size()));
         }
         else if (m_aiDifficulty == AIDifficulty::Normal) {
             // 普通模式：在前 50% 较好的步子里随机挑一个 (保留一点操作瑕疵)
             int halfSize = std::max(1, static_cast<int>(moves.size()) / 2);
-            idx = QRandomGenerator::global()->bounded(halfSize);
+            // 👇 修改：替换 global()
+            idx = m_random.bounded(halfSize);
         }
         else {
             // 疯狂模式：永远拿 weight 最高的第一名
@@ -617,4 +630,11 @@ void GameLogic::shuffleBoard() {
 void GameLogic::setRemainingMoves(int moves) {
     m_remainingMoves = moves;
     emit movesUpdated(m_remainingMoves);
+}
+
+
+// 👇 新增：设置随机数种子
+void GameLogic::setRandomSeed(quint32 seed) {
+    // 使用传入的种子重置随机数引擎
+    m_random = QRandomGenerator(seed);
 }

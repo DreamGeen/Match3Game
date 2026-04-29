@@ -9,6 +9,7 @@
 #include "DBHelper.h"
 #include "Global.h"
 #include <QQueue> // 记得加上队列头文件
+#include <QRandomGenerator>
 
 class GameLogic : public QObject {
     Q_OBJECT
@@ -51,6 +52,10 @@ public:
     // 玩家或 AI 交换方块的统一入口
     void handleSwap(QPoint p1, QPoint p2);
 
+
+    // 👈 2. 新增：允许外部（特别是房主）强制同步随机数种子
+    void setRandomSeed(quint32 seed);
+
 signals:
     void scoreUpdated(int newScore);
     void specialEffectTriggered(QPoint pos, SpecialType type);
@@ -71,6 +76,8 @@ signals:
     void boardExploded(QSet<QPoint> killList); // 通知UI哪些方块爆炸了
     void boardChanged();                       // 通知UI盘面发生了改变（比如掉落、洗牌）
     void turnEnded();                          // 通知大厅回合结束（可以触发AI了）
+
+    void playerSwapped(QPoint p1, QPoint p2); // 新增这个
 
 private:
     // 核心算法模块
@@ -132,6 +139,9 @@ private:
 
     bool m_isBot = false;
     bool simulateSwapAndCheck(QPoint p1, QPoint p2, int &scoreOut); // 脑内推演函数
+
+
+    QRandomGenerator m_random;
 };
 
 #endif

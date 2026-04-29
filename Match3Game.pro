@@ -18,6 +18,7 @@ SOURCES += \
     loginwidget.cpp \
     main.cpp \
     mainwindow.cpp \
+    networkmanager.cpp \
     testdbhelper.cpp
 HEADERS += \
     battleboardwidget.h \
@@ -30,6 +31,7 @@ HEADERS += \
     lobbywidget.h \
     loginwidget.h \
     mainwindow.h \
+    networkmanager.h \
     testdbhelper.h
 
 FORMS += \

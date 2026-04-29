@@ -60,7 +60,26 @@ int main(int argc, char *argv[]) {
                 gameWin->deleteLater();                // 释放掉游戏窗口的内存，防止越玩越卡
             });
         });
+
+        // 🌐 绑定大厅事件 2：网络对战模式（之前报错的代码，必须放在这里面！）
+        QObject::connect(lobbyWin, &LobbyWidget::onlineGameRequested, [=](UserSession session, bool isHost, QString targetIp) {
+            MainWindow *gameWin = new MainWindow(session, GameMode::Online, AIDifficulty::Normal, isHost, targetIp);
+            mainStage->addWidget(gameWin);
+            mainStage->setCurrentWidget(gameWin);
+
+            // 网络对战的返回按钮，切回大厅
+            QObject::connect(gameWin, &MainWindow::returnToLobbyRequested, [=]() {
+                lobbyWin->refreshScore();
+                mainStage->setCurrentWidget(lobbyWin);
+                mainStage->removeWidget(gameWin);
+                gameWin->deleteLater();
+            });
+        });
+
+
     });
+
+
 
     // 5. 拉开帷幕
     mainStage->show();
