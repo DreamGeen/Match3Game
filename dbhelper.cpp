@@ -165,9 +165,22 @@ bool DBHelper::recordGameResult(int userId, int score, GameMode mode, bool isWin
         return false;
     }
 
-    // 2. 更新用户总积分
-    query.prepare("UPDATE user_info SET total_score = total_score + :score WHERE user_id = :userId");
-    query.bindValue(":score", score);
+    // ==========================================
+    // 2. 更新用户总积分 (加入输了扣分机制)
+    // ==========================================
+    if (isWin) {
+        // 【胜利】：正常加上本局打出的得分
+        query.prepare("UPDATE user_info SET total_score = total_score + :score WHERE user_id = :userId");
+        query.bindValue(":score", score);
+    } else {
+        // 【失败】：扣除固定分数 (这里设定为扣除 3000 分，你可以根据难度自行调整)
+        int penalty = 3000;
+
+        // 使用 MySQL 的 GREATEST 函数，确保总分最低降到 0，不会出现负数积分
+        query.prepare("UPDATE user_info SET total_score = GREATEST(0, CAST(total_score AS SIGNED) - :penalty) WHERE user_id = :userId");
+        query.bindValue(":penalty", penalty);
+    }
+
     query.bindValue(":userId", userId);
 
     if (!query.exec()) {

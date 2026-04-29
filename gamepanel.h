@@ -17,6 +17,8 @@ class GamePanel : public QWidget {
 public:
     explicit GamePanel(GameLogic *logic, QWidget *parent = nullptr);
 
+    void setInteractive(bool interactive) { m_isInteractive = interactive; }
+
 public slots:
     // 监听逻辑层信号
     void onBoardChanged();
@@ -25,6 +27,12 @@ public slots:
 
     // 接收逻辑层发来的引爆信号
     void onSpecialEffectTriggered(QPoint pos, SpecialType type);
+
+    void onAiMoveDecided(QPoint p1, QPoint p2);
+
+signals:
+    void actionFinished(); // 这一波消除动画彻底结束的信号
+
 
 protected:
     // 处理玩家点击
@@ -56,6 +64,9 @@ private:
 
     // 专门用来抖动屏幕的辅助函数
     void shakeScreen();
+
+
+    bool m_isInteractive = true;
 };
 
 #endif

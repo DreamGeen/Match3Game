@@ -10,15 +10,34 @@
 #include <QApplication>
 #include <QStackedLayout>
 #include <QStyle>
+#include <QTimer> // 记得包含这个
+#include <QRandomGenerator>
 
 
-MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
+MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff, QWidget *parent)
     : QMainWindow(parent), m_session(session), m_currentMode(mode)
 {
     setWindowTitle("Bocchi Clear! - 全国巡演模式");
 
+    // 永远存在的玩家逻辑与面板
     m_logic = new GameLogic(GameConfig::BOARD_ROWS, GameConfig::BOARD_COLS, this);
     m_gamePanel = new GamePanel(m_logic, this);
+
+    // 【新增】如果是AI模式，初始化AI组件并开启托管
+    if (m_currentMode == GameMode::AI) {
+        // 根据难度设置 AI 的“手速”
+        if (diff == AIDifficulty::Easy) m_aiDelay = 3000;
+        else if (diff == AIDifficulty::Hard) m_aiDelay = 800;
+        else m_aiDelay = 2000;
+
+        m_aiLogic = new GameLogic(GameConfig::BOARD_ROWS, GameConfig::BOARD_COLS, this);
+
+        // 👇 【关键连接】：把大厅传来的 diff 难度参数注入给底层 AI 大脑
+        m_aiLogic->setBotMode(true, diff);
+
+        m_aiPanel = new GamePanel(m_aiLogic, this);
+        m_aiPanel->setInteractive(false); // 封锁AI面板的鼠标点击
+    }
 
     // ==========================================
     // 关卡数据配置表：加入物理磁盘路径下的 MV 视频
@@ -35,12 +54,19 @@ MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
     // 如果你暂时只有 stage_bg.png，可以取消下面这行的注释进行测试：
     // for(auto& lvl : m_levels) lvl.bgPath = ":/res/backgrounds/stage_bg.png";
 
-    setupUI();
-    setupResultPanel(); // 【新增】初始化结算界面
-    initConnections();
+    setupUI();          // 调用路由入口
+    setupResultPanel(); // 原样保留
+    initConnections();  // 这里处理了胜负结算逻辑分流
 
-    // 默认从第一关开始加载
-    loadLevel(0);
+    // 根据模式决定初始关卡
+    if (m_currentMode == GameMode::AI) {
+        // AI对战：在现有配置的关卡数量中随机抽取一关
+        int randomIndex = QRandomGenerator::global()->bounded(m_levels.size());
+        loadLevel(randomIndex);
+    } else {
+        // 单人闯关：依然老老实实从第 0 关（第一关）开始打
+        loadLevel(0);
+    }
 
     // 连接逻辑层更新信号
     connect(m_logic, &GameLogic::scoreUpdated, this, &MainWindow::updateScoreLabel);
@@ -48,19 +74,34 @@ MainWindow::MainWindow(UserSession session, GameMode mode, QWidget *parent)
 }
 
 
+// ==========================================
+// 核心 UI 路由入口
+// ==========================================
 void MainWindow::setupUI() {
     QWidget *centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
     centralWidget->setObjectName("mainContainer");
     centralWidget->setStyleSheet("background: transparent;");
 
-    // 👇 1. 全新的软件级视频合成引擎 (完美支持透明UI层叠)
+    setupCommonBackground(centralWidget);
+
+    if (m_currentMode == GameMode::Single) {
+        setupSinglePlayerUI(centralWidget);
+    } else if (m_currentMode == GameMode::AI) {
+        setupAIBattleUI(centralWidget);
+    }
+}
+
+// ==========================================
+// 公共底层背景 (视频 + 透明图)
+// ==========================================
+void MainWindow::setupCommonBackground(QWidget *centralWidget) {
     m_videoView = new QGraphicsView(centralWidget);
     m_videoView->setStyleSheet("background: transparent; border: none;");
     m_videoView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_videoView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_videoView->setAttribute(Qt::WA_TransparentForMouseEvents, true); // 让鼠标穿透视频层打到方块上
-    m_videoView->hide(); // 默认先隐藏
+    m_videoView->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    m_videoView->hide();
 
     m_videoScene = new QGraphicsScene(m_videoView);
     m_videoView->setScene(m_videoScene);
@@ -78,13 +119,16 @@ void MainWindow::setupUI() {
         }
     });
 
-    // 👇 2. 静态图片背景层 (依然贴在最底层)
     m_baseBgLabel = new QLabel(centralWidget);
     m_bgRevealLabel = new QLabel(centralWidget);
     m_baseBgLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     m_bgRevealLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+}
 
-    // 👇 3. 游戏UI面板层
+// ==========================================
+// 单人闯关 UI (100%原样复刻你的代码)
+// ==========================================
+void MainWindow::setupSinglePlayerUI(QWidget *centralWidget) {
     QFrame *boardPanel = new QFrame(centralWidget);
     boardPanel->setObjectName("boardPanel");
     boardPanel->setFixedSize(820, 780);
@@ -107,10 +151,8 @@ void MainWindow::setupUI() {
         widget->setGraphicsEffect(shadow);
     };
 
-    // --- 顶部状态栏排布 ---
     QHBoxLayout *topLayout = new QHBoxLayout();
-    QString modeStr = (m_currentMode == GameMode::Single) ? "单人" : "人机";
-    m_infoLabel = new QLabel(QString("🎸 %1 | %2").arg(m_session.nickname).arg(modeStr));
+    m_infoLabel = new QLabel(QString("🎸 %1 | 单人").arg(m_session.nickname));
     m_infoLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;");
     applyTextShadow(m_infoLabel);
 
@@ -149,10 +191,110 @@ void MainWindow::setupUI() {
     panelLayout->addLayout(topLayout);
     panelLayout->addWidget(m_gamePanel, 0, Qt::AlignHCenter);
 
-    // 用布局把整个游戏框死死居中
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->addWidget(boardPanel, 0, Qt::AlignCenter);
+}
+
+// ==========================================
+// AI 对战 UI (分屏竞速专属)
+// ==========================================
+void MainWindow::setupAIBattleUI(QWidget *centralWidget) {
+    auto applyTextShadow = [](QWidget* widget) {
+        QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(widget);
+        shadow->setOffset(1, 2); shadow->setBlurRadius(5); shadow->setColor(QColor(0, 0, 0, 220));
+        widget->setGraphicsEffect(shadow);
+    };
+
+    QString panelQss = R"(
+        QFrame {
+            background-color: rgba(0, 0, 0, 80);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 40);
+        }
+        QLabel { color: white; background: transparent; font-family: "Microsoft YaHei", "Segoe UI"; }
+    )";
+
+    // -- 玩家面板 (仍然叫 boardPanel 以兼容你的特效函数) --
+    QFrame *playerPanel = new QFrame(centralWidget);
+    playerPanel->setObjectName("boardPanel");
+    playerPanel->setFixedSize(820, 780);
+    playerPanel->setStyleSheet(panelQss);
+
+    QVBoxLayout *pLayout = new QVBoxLayout(playerPanel);
+    pLayout->setContentsMargins(30, 30, 30, 30);
+    pLayout->setSpacing(20);
+
+    QHBoxLayout *pTop = new QHBoxLayout();
+    m_infoLabel = new QLabel(QString("🎸 %1").arg(m_session.nickname));
+    m_infoLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700;");
+    applyTextShadow(m_infoLabel);
+
+    m_scoreLabel = new QLabel("🎵 得分: 0");
+    m_scoreLabel->setStyleSheet("font-size: 18px; font-weight: 900; color: #ffb6c1;");
+    applyTextShadow(m_scoreLabel);
+
+    // AI模式公用目标分数，不显示步数(纯竞速)
+    m_levelTargetLabel = new QLabel("🎯 目标: 0");
+    m_levelTargetLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700;");
+    applyTextShadow(m_levelTargetLabel);
+
+    // 初始化防空指针（即使隐藏也保留引用，防止 updateScoreLabel 报错）
+    m_movesLabel = new QLabel();
+    for(int i=0; i<3; ++i) m_starLabels[i] = new QLabel();
+
+    pTop->addWidget(m_infoLabel);
+    pTop->addStretch();
+    pTop->addWidget(m_levelTargetLabel);
+    pTop->addStretch();
+    pTop->addWidget(m_scoreLabel);
+
+    pLayout->addLayout(pTop);
+    pLayout->addWidget(m_gamePanel, 0, Qt::AlignHCenter);
+
+    // -- AI 面板 --
+    QFrame *aiPanel = new QFrame(centralWidget);
+    aiPanel->setObjectName("aiBoardPanel");
+    aiPanel->setFixedSize(820, 780);
+    aiPanel->setStyleSheet(panelQss);
+
+    QVBoxLayout *aLayout = new QVBoxLayout(aiPanel);
+    aLayout->setContentsMargins(30, 30, 30, 30);
+    aLayout->setSpacing(20);
+
+    QHBoxLayout *aTop = new QHBoxLayout();
+    QLabel *aiInfo = new QLabel("🤖 强力机器");
+    aiInfo->setStyleSheet("font-size: 18px; font-weight: bold; color: #00FFFF;");
+    applyTextShadow(aiInfo);
+
+    m_aiScoreLabel = new QLabel("🎵 得分: 0");
+    m_aiScoreLabel->setStyleSheet("font-size: 18px; font-weight: 900; color: #ffb6c1;");
+    applyTextShadow(m_aiScoreLabel);
+
+    aTop->addWidget(aiInfo);
+    aTop->addStretch();
+    aTop->addWidget(m_aiScoreLabel);
+
+    aLayout->addLayout(aTop);
+    aLayout->addWidget(m_aiPanel, 0, Qt::AlignHCenter);
+
+    // -- 拼装大舞台 --
+    QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
+    mainLayout->setContentsMargins(50, 20, 50, 20);
+    mainLayout->setSpacing(30);
+
+    QVBoxLayout *vsLayout = new QVBoxLayout();
+    QFrame *vLineTop = new QFrame(); vLineTop->setFrameShape(QFrame::VLine); vLineTop->setStyleSheet("border: 2px dashed rgba(255,105,180, 150);");
+    QLabel *vsLabel = new QLabel("VS"); vsLabel->setStyleSheet("font-size: 60px; font-weight: 900; color: #FFD700; font-style: italic;"); applyTextShadow(vsLabel);
+    QFrame *vLineBottom = new QFrame(); vLineBottom->setFrameShape(QFrame::VLine); vLineBottom->setStyleSheet("border: 2px dashed rgba(255,105,180, 150);");
+
+    vsLayout->addWidget(vLineTop, 1, Qt::AlignHCenter);
+    vsLayout->addWidget(vsLabel, 0, Qt::AlignHCenter);
+    vsLayout->addWidget(vLineBottom, 1, Qt::AlignHCenter);
+
+    mainLayout->addWidget(playerPanel, 0, Qt::AlignRight | Qt::AlignVCenter);
+    mainLayout->addLayout(vsLayout);
+    mainLayout->addWidget(aiPanel, 0, Qt::AlignLeft | Qt::AlignVCenter);
 }
 
 
@@ -176,7 +318,31 @@ void MainWindow::loadLevel(int index) {
     m_starThresholds[1] = cfg.targetScore * 0.6;
     m_starThresholds[2] = cfg.targetScore;
 
-    m_logic->startLevel(m_session.uid, m_currentMode, cfg.targetScore, cfg.maxMoves);
+
+
+
+    // 2. 如果是对战模式，修改这份【拷贝】的目标分数
+    if (m_currentMode == GameMode::AI) {
+        cfg.targetScore = qMax(cfg.targetScore * 3, 3000);
+    }
+
+
+    // 👇 1. 动态决定步数：如果是 AI 模式，直接给 999 步！否则保持原关卡步数
+    int maxMoves = (m_currentMode == GameMode::AI) ? 999 : cfg.maxMoves;
+
+    // 👇 2. 把算好的 maxMoves 传给玩家！
+    m_logic->startLevel(m_session.uid, m_currentMode, cfg.targetScore, maxMoves);
+
+
+    // 如果是AI模式，启动对手逻辑
+    if (m_currentMode == GameMode::AI && m_aiLogic) {
+        m_aiScoreLabel->setText("🎵 得分: 0");
+        // 👇 3. 把算好的 maxMoves 也传给 AI！
+        m_aiLogic->startLevel(0, m_currentMode, cfg.targetScore, maxMoves);
+
+        // 【修改】：给玩家一点“先手优势”，开局 2.5 秒后 AI 才开始发起第一次攻击（原来是 1.5 秒）
+        QTimer::singleShot(2500, m_aiLogic, &GameLogic::triggerNextBotMove);
+    }
 
 
     // 装载对应关卡的 MV
@@ -234,6 +400,16 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 void MainWindow::updateScoreLabel(int score) {
     m_scoreLabel->setText(QString("🎵 当前得分: %1").arg(score));
 
+    // =======================================================
+    // 🚨 终极防错防御：不查表，直接问引擎现在的满分是多少！
+    // =======================================================
+    int target = m_logic->getTargetScore();
+    if (target <= 0) target = 1; // 物理防御，防止除以 0
+
+    // 实时计算当前局的三星及格线（抛弃容易错位的 m_starThresholds 数组）
+    int currentThresholds[3] = { (int)(target * 0.3), (int)(target * 0.6), target };
+
+
     // ==========================================
     // 💥 终极物理拦截：狂欢时间强制透明并退出
     // ==========================================
@@ -261,7 +437,10 @@ void MainWindow::updateScoreLabel(int score) {
         return; // 💥 直接退出，保持 MV 播放时的全透明
     }
 
-    int target = m_levels[m_currentLevelIndex].targetScore;
+    // 👇【核心修复 2】：不要去原始的 m_levels 数组里拿了！
+    // 删掉这行: int target = m_levels[m_currentLevelIndex].targetScore;
+
+
     double percent = qBound(0.0, (double)score / target, 1.0);
 
     // ==========================================
@@ -432,7 +611,51 @@ void MainWindow::initConnections() {
                 QLabel { color: white; background: transparent; font-family: "Microsoft YaHei", "Segoe UI"; }
             )");
         }
+
+        // 👇【核心修复】：AI 模式下赢了之后的专属“狂欢处理”
+        if (m_currentMode == GameMode::AI) {
+            // 1. 强杀对手：停掉AI的行动，并把右边的棋盘直接隐藏！
+            if (m_aiLogic) m_aiLogic->endAndSaveGame(false);
+            QFrame* aiPanel = centralWidget()->findChild<QFrame*>("aiBoardPanel");
+            if (aiPanel) aiPanel->hide();
+
+            // 2. 颁发奖励：把你 999 的无限步数改成 10 步，享受个人 Show Time！
+            m_logic->setRemainingMoves(10);
+
+            // 3. 顺便把左上角的文字改得炫酷一点
+            m_infoLabel->setText("🎸 狂欢时间 (Bonus Time!)");
+            m_infoLabel->setStyleSheet("font-size: 20px; font-weight: 900; color: #FFea00;");
+        }
     });
+
+
+
+
+
+    // 【新增】AI 信号绑定
+    if (m_currentMode == GameMode::AI && m_aiLogic) {
+        // AI计分更新
+        connect(m_aiLogic, &GameLogic::scoreUpdated, this, [this](int score){
+            m_aiScoreLabel->setText(QString("🎵 得分: %1").arg(score));
+        });
+
+        // AI算力路由到面板
+        connect(m_aiLogic, &GameLogic::aiMoveDecided, m_aiPanel, &GamePanel::onAiMoveDecided);
+
+        // 面板播完动画后，路由回AI触发下一步
+        connect(m_aiPanel, &GamePanel::actionFinished, this, [this](){
+            if (!m_aiLogic->isGameOver() && !m_logic->isGameOver()) {
+                QTimer::singleShot(m_aiDelay, m_aiLogic, &GameLogic::triggerNextBotMove);
+            }
+        });
+
+        // AI抢先达到目标分 -> AI胜利
+        connect(m_aiLogic, &GameLogic::targetReached, this, [this](){
+            m_aiLogic->endAndSaveGame(true); // 🚨 关键修复：AI 赢了之后也要强行杀死它自己，停止后台计算！
+            m_logic->endAndSaveGame(false); // 判定玩家失败
+            onLevelFinished(false);         // 直接弹结算框：输了
+        });
+    }
 }
 // 槽函数实现
 void MainWindow::onLevelFinished(bool isWin) {

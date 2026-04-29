@@ -398,6 +398,12 @@ bool GameLogic::checkSpecialCombo(QPoint p1, QPoint p2) {
  * 核心：在这里调用你 DBHelper 里的 recordGameResult
  */
 void GameLogic::endAndSaveGame(bool isWin) {
+    // 👇 1. 关键修复：彻底锁死游戏状态，强制引擎停转！
+    m_isGameOver = true;
+
+    // 👇 2. 关键修复：如果是 AI 机器人，绝对不能存数据库，直接下班！
+    if (m_isBot) return;
+
     int duration = m_startTime.secsTo(QDateTime::currentDateTime());
 
     // 直接使用你代码中的单例和事务逻辑
@@ -652,4 +658,56 @@ void GameLogic::applyGravity() {
             }
         }
     }
+}
+
+// AI 模拟交换并评分（权重）
+bool GameLogic::simulateSwapAndCheck(QPoint p1, QPoint p2, int &scoreOut) {
+    std::swap(m_board[p1.x()][p1.y()], m_board[p2.x()][p2.y()]);
+    QSet<QPoint> matches = findMatches();
+    scoreOut = matches.size() * 10;
+
+    // 如果能合成特效，大幅加分
+    if (matches.size() >= 5) scoreOut += 500;
+    else if (matches.size() == 4) scoreOut += 200;
+
+    // 魔力鸟特权
+    if (m_board[p1.x()][p1.y()].special == SpecialType::MagicBird ||
+        m_board[p2.x()][p2.y()].special == SpecialType::MagicBird) scoreOut += 1000;
+
+    std::swap(m_board[p1.x()][p1.y()], m_board[p2.x()][p2.y()]);
+    return !matches.isEmpty() || scoreOut >= 1000;
+}
+
+void GameLogic::triggerNextBotMove() {
+    if (!m_isBot || m_isGameOver) return;
+
+    struct Move { QPoint p1, p2; int weight; };
+    std::vector<Move> moves;
+
+    for (int r = 0; r < m_rows; ++r) {
+        for (int c = 0; c < m_cols; ++c) {
+            int w = 0;
+            if (c < m_cols - 1 && simulateSwapAndCheck({r, c}, {r, c + 1}, w)) moves.push_back({{r, c}, {r, c + 1}, w});
+            if (r < m_rows - 1 && simulateSwapAndCheck({r, c}, {r + 1, c}, w)) moves.push_back({{r, c}, {r + 1, c}, w});
+        }
+    }
+
+    if (!moves.empty()) {
+        // 根据智商排序
+        std::sort(moves.begin(), moves.end(), [](const Move& a, const Move& b){ return a.weight > b.weight; });
+
+        int idx = 0;
+        if (m_aiDifficulty == AIDifficulty::Easy) idx = rand() % moves.size(); // 随机乱点
+        else if (m_aiDifficulty == AIDifficulty::Normal) idx = rand() % (std::max(1, (int)moves.size()/2)); // 挑凑合的
+        else idx = 0; // 永远选最强的走法
+
+        emit aiMoveDecided(moves[idx].p1, moves[idx].p2);
+    }
+}
+
+
+
+void GameLogic::setRemainingMoves(int moves) {
+    m_remainingMoves = moves;
+    emit movesUpdated(m_remainingMoves);
 }

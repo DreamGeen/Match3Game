@@ -14,11 +14,14 @@
 #include <QGraphicsVideoItem>
 #include "GamePanel.h"
 #include "Global.h"
+#include "BattleBoardWidget.h"
+
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(UserSession session, GameMode mode, QWidget *parent = nullptr);
+    // 增加 AIDifficulty 参数
+    explicit  MainWindow(UserSession session, GameMode mode, AIDifficulty diff = AIDifficulty::Normal, QWidget *parent = nullptr);
 
 protected:
     // 重写 resizeEvent，用于全屏动态背景缩放自适应
@@ -38,6 +41,10 @@ private slots:
     void onReturnClicked();
 
 private:
+
+    BattleBoardWidget *m_player1Board;
+    BattleBoardWidget *m_player2Board; // 单人模式时为 nullptr
+
     UserSession m_session;
     GameMode m_currentMode;
     GamePanel *m_gamePanel;
@@ -91,9 +98,24 @@ private:
     QPushButton *m_returnBtn;
 
     void setupUI();
+    void setupCommonBackground(QWidget *centralWidget); // 抽离公共背景
+    void setupSinglePlayerUI(QWidget *centralWidget);   // 单人专属UI
+    void setupAIBattleUI(QWidget *centralWidget);       // AI对战专属UI
+
+    // AI模式新增的指针
+    GameLogic *m_aiLogic;
+    GamePanel *m_aiPanel;
+    QLabel *m_aiScoreLabel;
+
+
     void initConnections();
     void loadLevel(int index); // 加载关卡的核心函数
     void setupResultPanel(); // 【新增】
+
+    int m_aiDelay = 2000; // AI 思考延迟
+
+
+
 };
 
 #endif // MAINWINDOW_H

@@ -42,7 +42,7 @@ void GamePanel::initPanel() {
 }
 
 void GamePanel::mousePressEvent(QMouseEvent *event) {
-    if (m_isAnimating) return;
+    if (!m_isInteractive || m_isAnimating) return; // 【修改点】被托管时锁死鼠标
 
     int col = event->pos().x() / GameConfig::TILE_SIZE;
     int row = event->pos().y() / GameConfig::TILE_SIZE;
@@ -124,7 +124,10 @@ void GamePanel::performSwapAnimation(QPoint p1, QPoint p2, bool isBack) {
             }else{
                 // 【新增】：消除成功，播放吉他扫弦
                 m_matchSound->play();
+                emit actionFinished(); // 【新增】操作成功，通知AI继续
             }
+        }else {
+          emit actionFinished(); // 【新增】AI没消成换回去了，回合也算结束
         }
 
         m_isAnimating = false;
@@ -133,6 +136,7 @@ void GamePanel::performSwapAnimation(QPoint p1, QPoint p2, bool isBack) {
 
     group->start();
 }
+
 
 void GamePanel::onBoardChanged() {
     // 当逻辑层发生消除或下落后，同步 UI 数据
@@ -290,4 +294,8 @@ void GamePanel::showLaserAnimation(int index, bool isHorizontal) {
 
     connect(ani, &QPropertyAnimation::finished, laser, &QWidget::deleteLater);
     ani->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void GamePanel::onAiMoveDecided(QPoint p1, QPoint p2) {
+    performSwapAnimation(p1, p2, false); // 完美复用你的动画！
 }

@@ -27,6 +27,21 @@ public:
     // 数据接口
     const Tile& getTile(int r, int c) const { return m_board[r][c]; }
     int getCurrentScore() const { return m_currentScore; }
+    // 👇【新增这一行】：让外界能获取引擎里最真实的目标分数！
+    int getTargetScore() const { return m_targetScore; }
+
+
+    // 【修改】：加入难度参数，让大脑知道自己有多聪明
+    void setBotMode(bool isBot, AIDifficulty diff = AIDifficulty::Normal) {
+        m_isBot = isBot;
+        m_aiDifficulty = diff;
+    }
+    void triggerNextBotMove();// 触发 AI 思考
+    bool isGameOver() const { return m_isGameOver; }
+
+
+
+    void setRemainingMoves(int moves); // 强制修改剩余步数
 
 signals:
     void boardChanged();
@@ -42,6 +57,9 @@ signals:
 
     void targetReached(); // 目标达成，通知播放 MV
 
+
+    void aiMoveDecided(QPoint p1, QPoint p2); // AI算好的坐标
+
 private:
     // 核心算法模块
     void triggerTileEffect(int r, int c, std::set<std::pair<int, int>>& toRemove);
@@ -56,6 +74,8 @@ private:
     void refillBoard(); // 随机生成新的波奇/虹夏方块
 
     QSet<QPoint> triggerSpecialEffect(QPoint pos, SpecialType type);
+
+    AIDifficulty m_aiDifficulty = AIDifficulty::Normal; // 记录 AI 的智商级别
 
 
 
@@ -87,6 +107,11 @@ private:
     GameMode m_currentMode;
     QDateTime m_startTime;
     std::vector<std::vector<Tile>> m_board;
+
+
+
+    bool m_isBot = false;
+    bool simulateSwapAndCheck(QPoint p1, QPoint p2, int &scoreOut); // 脑内推演函数
 };
 
 #endif
