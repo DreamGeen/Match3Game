@@ -89,8 +89,12 @@ void GameLogic::handleSwap(QPoint p1, QPoint p2) {
     emit movesUpdated(m_remainingMoves);
     m_currentCombo = 1;
 
-    // 进入结算引擎
-    executeElimination(killList, p1);
+    // 👇 【核心修复】：如果是魔力鸟主动引爆，传入 (-1, -1) 剥夺其合成新特效的资格
+    QPoint activePoint = (isBird1 || isBird2) ? QPoint(-1, -1) : p1;
+
+    // 错误代码：executeElimination(killList, p1);
+    // 正确修复：👇 把 p1 改成 activePoint ！！！
+    executeElimination(killList, activePoint);
 }
 
 void GameLogic::executeElimination(QSet<QPoint> rawKillList, QPoint activePoint) {
@@ -101,9 +105,34 @@ void GameLogic::executeElimination(QSet<QPoint> rawKillList, QPoint activePoint)
     int scoreGained = finalKillList.size() * 10 * m_currentCombo;
     m_currentScore += scoreGained;          // 👈 修改：换成 m_currentScore
     emit scoreUpdated(m_currentScore);      // 👈 修改：换成 scoreUpdated 信号
-    // 合成新特效
+
+    // 👇 【核心修复】：细化特效合成逻辑
     if (activePoint.x() != -1 && rawKillList.size() >= 4) {
-        SpecialType newSpecial = (rawKillList.size() >= 5) ? SpecialType::MagicBird : SpecialType::Bomb;
+        SpecialType newSpecial = SpecialType::None;
+
+        if (rawKillList.size() >= 5) {
+            // 统计是否在同一行或同一列达到 5 个
+            int sameRow = 0, sameCol = 0;
+            for (const QPoint& p : rawKillList) {
+                if (p.x() == activePoint.x()) sameRow++;
+                if (p.y() == activePoint.y()) sameCol++;
+            }
+
+            if (sameRow >= 5 || sameCol >= 5) {
+                newSpecial = SpecialType::MagicBird; // 觉醒波奇
+            } else {
+                newSpecial = SpecialType::Bomb;      // L型或T型 -> 鼓点爆炸
+            }
+        } else if (rawKillList.size() == 4) {
+            // 4连消除，判断是横向连还是纵向连
+            int sameRow = 0;
+            for (const QPoint& p : rawKillList) {
+                if (p.x() == activePoint.x()) sameRow++;
+            }
+            // 如果同一行有 4 个，说明是横排消除，通常生成纵向特效（或横向，可按需对调）
+            newSpecial = (sameRow >= 4) ? SpecialType::LineVertical : SpecialType::LineHorizontal;
+        }
+
         finalKillList.remove(activePoint);
         m_board[activePoint.x()][activePoint.y()].special = newSpecial;
         if(newSpecial == SpecialType::MagicBird) m_board[activePoint.x()][activePoint.y()].color = 0;
@@ -160,6 +189,7 @@ QSet<QPoint> GameLogic::expandKillList(QSet<QPoint> initialKillList) {
 
         // 如果引爆的是横向特效
         if (t.special == SpecialType::LineHorizontal) {
+            emit specialEffectTriggered(p, t.special); // 👈 补上这行通知UI
             for (int c = 0; c < m_cols; ++c) {
                 QPoint newP(p.x(), c);
                 if (!finalKillList.contains(newP)) {
@@ -170,6 +200,7 @@ QSet<QPoint> GameLogic::expandKillList(QSet<QPoint> initialKillList) {
         }
         // 如果引爆的是纵向特效
         else if (t.special == SpecialType::LineVertical) {
+            emit specialEffectTriggered(p, t.special); // 👈 补上这行通知UI
             for (int r = 0; r < m_rows; ++r) {
                 QPoint newP(r, p.y());
                 if (!finalKillList.contains(newP)) {
@@ -180,6 +211,7 @@ QSet<QPoint> GameLogic::expandKillList(QSet<QPoint> initialKillList) {
         }
         // 如果引爆的是炸弹 (3x3 范围)
         else if (t.special == SpecialType::Bomb) {
+            emit specialEffectTriggered(p, t.special); // 👈 补上这行通知UI
             for (int r = std::max(0, p.x() - 1); r <= std::min(m_rows - 1, p.x() + 1); ++r) {
                 for (int c = std::max(0, p.y() - 1); c <= std::min(m_cols - 1, p.y() + 1); ++c) {
                     QPoint newP(r, c);
@@ -202,7 +234,8 @@ void GameLogic::applyGravityAndRefill() {
     for (int c = 0; c < m_cols; ++c) {
         int emptyRow = m_rows - 1; // 从底部开始找空位
         for (int r = m_rows - 1; r >= 0; --r) {
-            if (m_board[r][c].color != 0) {
+            // ⬇️ 修改判断条件：只要不是空方块（包括魔力鸟），就受重力影响下落
+            if (!m_board[r][c].isEmpty()) {
                 // 如果发现实体方块，把它拉到最底部的空位上
                 if (emptyRow != r) {
                     std::swap(m_board[emptyRow][c], m_board[r][c]);
@@ -215,7 +248,8 @@ void GameLogic::applyGravityAndRefill() {
     // 2. 在顶部的空位生成新方块
     for (int r = 0; r < m_rows; ++r) {
         for (int c = 0; c < m_cols; ++c) {
-            if (m_board[r][c].color == 0 && m_board[r][c].special != SpecialType::MagicBird) {
+            // ⬇️ 修改判断条件：只对真正的空方块进行填充
+            if (m_board[r][c].isEmpty()) {
                 // 使用之前建议的 QRandomGenerator
                 m_board[r][c].color = QRandomGenerator::global()->bounded(1, GameConfig::COLOR_COUNT + 1);
                 m_board[r][c].special = SpecialType::None;

@@ -16,7 +16,9 @@ enum class SpecialType {
 struct Tile {
     int color = 0; // 0为空，1-5为正常颜色
     SpecialType special = SpecialType::None;
-    bool isEmpty() const { return color == 0; }
+
+    // ⬇️ 修改这一行，增加对 special 的判断
+    bool isEmpty() const { return color == 0 && special == SpecialType::None; }
 
     // 如果你以后想加动画状态，也可以加在这里
     bool isMatched = false;
