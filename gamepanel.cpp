@@ -5,6 +5,9 @@
 #include <QGraphicsOpacityEffect>  // 【新增】：修复激光透明度动画必需
 #include <QPropertyAnimation>
 #include <QSequentialAnimationGroup> // <--- 加上这个
+#include <cmath>
+#include <QTimer>
+#include <QVariantAnimation>
 
 GamePanel::GamePanel(GameLogic *logic, QWidget *parent)
     : QWidget(parent), m_logic(logic)
@@ -155,11 +158,42 @@ void GamePanel::performSwapAnimation(QPoint p1, QPoint p2, bool isBack) {
 }
 
 void GamePanel::onBoardChanged() {
-    // 当逻辑层发生消除或下落后，同步 UI 数据
     for(int r = 0; r < GameConfig::BOARD_ROWS; ++r) {
         for(int c = 0; c < GameConfig::BOARD_COLS; ++c) {
-            m_blocks[r][c]->setTileData(m_logic->getTile(r, c));
-            // 找到对应的 Widget 并更新它
+            // 获取方块前后的状态
+            Tile oldData = m_blocks[r][c]->getTileData();
+            Tile newData = m_logic->getTile(r, c);
+
+            m_blocks[r][c]->setTileData(newData);
+
+            // 👇 核心动画逻辑：如果这个位置变成了新的实体方块（颜色不同，或是新生成的）
+            if (newData.color != 0 && (oldData.color != newData.color || oldData.special != newData.special)) {
+
+                QPoint targetPos = BlockWidget::logicalToPixel(r, c);
+                // 让方块起始位置偏上（制造一种从上空掉下来的视觉欺骗）
+                QPoint startPos = targetPos - QPoint(0, GameConfig::TILE_SIZE / 2);
+
+                m_blocks[r][c]->move(startPos);
+                m_blocks[r][c]->setOpacity(0.0); // 初始全透明
+
+                // 创建组合动画（同时播放掉落和淡入）
+                QParallelAnimationGroup *group = new QParallelAnimationGroup(m_blocks[r][c]);
+
+                // 1. 掉落动画
+                QPropertyAnimation *moveAnim = new QPropertyAnimation(m_blocks[r][c], "pos");
+                moveAnim->setDuration(300 + r * 40); // 加上 r * 40 让底部的方块掉落得稍微久一点，产生级联感
+                moveAnim->setEndValue(targetPos);
+                moveAnim->setEasingCurve(QEasingCurve::OutBounce); // 落地时带有 Q弹 的物理反馈
+
+                // 2. 淡入动画
+                QPropertyAnimation *fadeAnim = new QPropertyAnimation(m_blocks[r][c], "opacity");
+                fadeAnim->setDuration(250);
+                fadeAnim->setEndValue(1.0);
+
+                group->addAnimation(moveAnim);
+                group->addAnimation(fadeAnim);
+                group->start(QAbstractAnimation::DeleteWhenStopped);
+            }
         }
     }
 }
@@ -276,42 +310,132 @@ void GamePanel::shakeScreen() {
 }
 
 void GamePanel::showLaserAnimation(int index, bool isHorizontal) {
+    int cellSize = width() / 8;
+    int laserThick = cellSize * 0.8;
+    int centerX = width() / 2;
+    int centerY = height() / 2;
+
+    // ==========================================
+    // 💥 第一层：主干激光 (居合斩爆开与消散)
+    // ==========================================
     QWidget *laser = new QWidget(this);
 
-    // 设置“波奇粉”激光样式
-    QString style = isHorizontal ?
-                        "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,105,180,0), stop:0.5 rgba(255,182,193,255), stop:1 rgba(255,105,180,0));" :
-                        "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(255,105,180,0), stop:0.5 rgba(255,182,193,255), stop:1 rgba(255,105,180,0));";
+    // 初始高亮样式
+    QString baseStyle = isHorizontal ?
+                            "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,20,147,0), stop:0.2 rgba(255,105,180,200), stop:0.5 rgba(255,255,255,255), stop:0.8 rgba(255,105,180,200), stop:1 rgba(255,20,147,0));" :
+                            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(255,20,147,0), stop:0.2 rgba(255,105,180,200), stop:0.5 rgba(255,255,255,255), stop:0.8 rgba(255,105,180,200), stop:1 rgba(255,20,147,0));";
+    laser->setStyleSheet(baseStyle);
 
-    laser->setStyleSheet(style);
-
-    int cellSize = width() / 8;
+    // 初始化为屏幕正中心的一个“点”
     if (isHorizontal) {
-        laser->setGeometry(0, index * cellSize + cellSize/3, width(), cellSize/3);
+        laser->setGeometry(centerX, index * cellSize + (cellSize - laserThick) / 2, 0, laserThick);
     } else {
-        laser->setGeometry(index * cellSize + cellSize/3, 0, cellSize/3, height());
+        laser->setGeometry(index * cellSize + (cellSize - laserThick) / 2, centerY, laserThick, 0);
     }
-
     laser->show();
-
-    // 【关键修复 1】：强制将激光提到 UI 最上层，防止被 BlockWidget 挡住
     laser->raise();
 
-    // 【关键修复 2】：使用 QGraphicsOpacityEffect 解决普通 QWidget 无法执行透明度动画的问题
-    QGraphicsOpacityEffect *opacityEffect = new QGraphicsOpacityEffect(laser);
-    laser->setGraphicsEffect(opacityEffect);
+    QGraphicsOpacityEffect *opEff = new QGraphicsOpacityEffect(laser);
+    laser->setGraphicsEffect(opEff);
 
-    // 动画目标改为 opacityEffect 的 "opacity" 属性
-    QPropertyAnimation *ani = new QPropertyAnimation(opacityEffect, "opacity");
-    ani->setDuration(250);
-    ani->setStartValue(1.0);
-    ani->setEndValue(0.0);
-    ani->setEasingCurve(QEasingCurve::OutCubic);
+    // 横扫/纵扫展开动画 (极致爆发速度)
+    QPropertyAnimation *geomAnim = new QPropertyAnimation(laser, "geometry");
+    geomAnim->setDuration(250);
+    geomAnim->setEndValue(isHorizontal ?
+                              QRect(0, index * cellSize + (cellSize - laserThick) / 2, width(), laserThick) :
+                              QRect(index * cellSize + (cellSize - laserThick) / 2, 0, laserThick, height()));
+    geomAnim->setEasingCurve(QEasingCurve::OutExpo);
 
-    connect(ani, &QPropertyAnimation::finished, laser, &QWidget::deleteLater);
-    ani->start(QAbstractAnimation::DeleteWhenStopped);
+    // 缓慢暗淡动画
+    QPropertyAnimation *alphaAnim = new QPropertyAnimation(opEff, "opacity");
+    alphaAnim->setDuration(800);
+    alphaAnim->setStartValue(1.0);
+    alphaAnim->setKeyValueAt(0.2, 1.0);
+    alphaAnim->setEndValue(0.0);
+
+    QParallelAnimationGroup *mainGroup = new QParallelAnimationGroup(laser);
+    mainGroup->addAnimation(geomAnim);
+    mainGroup->addAnimation(alphaAnim);
+    connect(mainGroup, &QAnimationGroup::finished, laser, &QWidget::deleteLater);
+    mainGroup->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // ==========================================
+    // ⚡ 第二层：核心高频脉冲 (动态能量带)
+    // 核心秘诀：利用正弦波实时改变 CSS 渐变色，制造闪烁电弧感
+    // ==========================================
+    QVariantAnimation *pulseAnim = new QVariantAnimation(laser);
+    pulseAnim->setDuration(800);
+    pulseAnim->setStartValue(0.0);
+    pulseAnim->setEndValue(1.0);
+    connect(pulseAnim, &QVariantAnimation::valueChanged, [laser, isHorizontal](const QVariant &val){
+        double v = val.toDouble();
+        // 产生高频脉冲 (乘以 6 代表在存活期内激烈波动 6 次)
+        double coreWidth = 0.05 + 0.35 * std::abs(std::sin(v * 3.14159 * 6));
+        double s1 = 0.5 - coreWidth;
+        double s2 = 0.5 + coreWidth;
+
+        QString pulseStyle = isHorizontal ?
+                                 QString("background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,20,147,0), stop:%1 rgba(255,105,180,200), stop:0.5 rgba(255,255,255,255), stop:%2 rgba(255,105,180,200), stop:1 rgba(255,20,147,0));").arg(s1).arg(s2) :
+                                 QString("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(255,20,147,0), stop:%1 rgba(255,105,180,200), stop:0.5 rgba(255,255,255,255), stop:%2 rgba(255,105,180,200), stop:1 rgba(255,20,147,0));").arg(s1).arg(s2);
+        laser->setStyleSheet(pulseStyle);
+    });
+    pulseAnim->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // ==========================================
+    // ☄️ 第三层：高速能量流 (离子光束飞掠穿梭)
+    // 核心秘诀：生成细长的白条，从中心极速射向两边
+    // ==========================================
+    for(int i = 0; i < 4; i++) {
+        QWidget *streak = new QWidget(this);
+        streak->setStyleSheet("background-color: rgba(255, 255, 255, 240); border-radius: 2px;");
+        streak->hide(); // 初始隐藏，等待延迟触发
+
+        int streakThick = 2 + (rand() % 4);          // 随机极细的射线
+        int streakLength = 80 + (rand() % 80);       // 随机射线长度
+        int delay = rand() % 150;                    // 错开它们发射的时间
+        int duration = 200 + (rand() % 150);         // 随机飞行速度
+
+        // 在主激光的横截面内随机做一点偏移，不那么死板
+        int offset = (rand() % (laserThick / 2)) - (laserThick / 4);
+
+        QPropertyAnimation *moveAnim = new QPropertyAnimation(streak, "pos", streak);
+        moveAnim->setDuration(duration);
+        moveAnim->setEasingCurve(QEasingCurve::InCubic);
+
+        if (isHorizontal) {
+            int yPos = index * cellSize + cellSize / 2 + offset - streakThick / 2;
+            // 一半往左飞，一半往右飞
+            int startX = (i % 2 == 0) ? centerX - streakLength : centerX;
+            int endX   = (i % 2 == 0) ? width() : -streakLength;
+
+            streak->setGeometry(startX, yPos, streakLength, streakThick);
+            moveAnim->setStartValue(QPoint(startX, yPos));
+            moveAnim->setEndValue(QPoint(endX, yPos));
+        } else {
+            int xPos = index * cellSize + cellSize / 2 + offset - streakThick / 2;
+            // 一半往上飞，一半往下飞
+            int startY = (i % 2 == 0) ? centerY - streakLength : centerY;
+            int endY   = (i % 2 == 0) ? height() : -streakLength;
+
+            streak->setGeometry(xPos, startY, streakThick, streakLength);
+            moveAnim->setStartValue(QPoint(xPos, startY));
+            moveAnim->setEndValue(QPoint(xPos, endY));
+        }
+
+        // 延迟触发能量流动画
+        QTimer::singleShot(delay, [streak, moveAnim]() {
+            streak->show();
+            streak->raise();
+            moveAnim->start(QAbstractAnimation::DeleteWhenStopped);
+            connect(moveAnim, &QPropertyAnimation::finished, streak, &QWidget::deleteLater);
+        });
+    }
+
+    // ==========================================
+    // 🌍 终极反馈：调用你的代码进行屏幕抖动
+    // ==========================================
+    shakeScreen();
 }
-
 void GamePanel::onAiMoveDecided(QPoint p1, QPoint p2) {
     performSwapAnimation(p1, p2, false); // 完美复用你的动画！
 }

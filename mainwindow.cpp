@@ -301,7 +301,15 @@ void MainWindow::setupAIBattleUI(QWidget *centralWidget) {
 void MainWindow::loadLevel(int index) {
     if (index >= m_levels.size()) return;
 
+    // 👇【新增】：恢复全局背景音乐
+    QSoundEffect *bgm = this->window()->findChild<QSoundEffect*>();
+    if (bgm && !bgm->isPlaying()) {
+        bgm->play();
+    }
+
+
     m_isBonusTime = false; // 【新增】：新关卡一定要重置开关！
+
 
     // 👇【加上这行救命代码】：确保新关卡开始时，彻底关闭硬件透明，让 QSS 重新接管背景绘制！
     QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
@@ -596,13 +604,17 @@ void MainWindow::initConnections() {
         m_videoView->show(); // 让咱们的新视频引擎露出来
         m_mediaPlayer->play();
 
+        // 👇【新增】：查找到全局背景音乐，并停止播放
+        QSoundEffect *bgm = this->window()->findChild<QSoundEffect*>();
+        if (bgm) bgm->stop();
+
         QFrame* boardPanel = centralWidget()->findChild<QFrame*>("boardPanel");
         if (boardPanel) {
-            // 停掉动画
-            QList<QVariantAnimation*> anims = boardPanel->findChildren<QVariantAnimation*>();
-            for (QVariantAnimation* anim : anims) {
-                anim->stop();
-                anim->deleteLater();
+            // 👇【核心修复】：不要一刀切！只精准停掉控制背景黑雾的 "alphaAnim"
+            QVariantAnimation* alphaAnim = boardPanel->findChild<QVariantAnimation*>("alphaAnim");
+            if (alphaAnim) {
+                alphaAnim->stop();
+                alphaAnim->deleteLater();
             }
 
             // 扒掉底板（因为换了软件渲染，这次背景会完美的融合成视频画面！）
@@ -755,5 +767,10 @@ void MainWindow::onRestartClicked() {
 
 void MainWindow::onReturnClicked() {
     m_mediaPlayer->stop();
+    // 👇【新增】：返回大厅前，恢复全局背景音乐
+    QSoundEffect *bgm = this->window()->findChild<QSoundEffect*>();
+    if (bgm && !bgm->isPlaying()) {
+        bgm->play();
+    }
     emit returnToLobbyRequested(); // 通知主程序切回大厅
 }
