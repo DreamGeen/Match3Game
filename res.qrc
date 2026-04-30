@@ -18,5 +18,7 @@
         <file>res/backgrounds/level3.png</file>
         <file>res/backgrounds/level4.png</file>
         <file>res/backgrounds/level5.png</file>
+        <file>res/bomb/effect_glitch.png</file>
+        <file>res/bomb/effect_neon.png</file>
     </qresource>
 </RCC>

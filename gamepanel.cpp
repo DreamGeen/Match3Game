@@ -8,6 +8,10 @@
 #include <cmath>
 #include <QTimer>
 #include <QVariantAnimation>
+#include <QRandomGenerator>
+#include <QLabel>
+#include <QParallelAnimationGroup>
+#include <QPoint>
 
 GamePanel::GamePanel(GameLogic *logic, QWidget *parent)
     : QWidget(parent), m_logic(logic)
@@ -254,6 +258,7 @@ void GamePanel::onSpecialEffectTriggered(QPoint pos, SpecialType type) {
         showLaserAnimation(pos.y(), false); // 纵向扫弦
     }
     else if (type == SpecialType::Bomb) {
+        playBombEffect(pos.x(),pos.y());
         // 放大器爆炸：可以让屏幕轻微抖动一下
          shakeScreen();
     }
@@ -439,3 +444,150 @@ void GamePanel::showLaserAnimation(int index, bool isHorizontal) {
 void GamePanel::onAiMoveDecided(QPoint p1, QPoint p2) {
     performSwapAnimation(p1, p2, false); // 完美复用你的动画！
 }
+
+
+
+void GamePanel::playBombEffect(int row, int col) {
+    int blockSize = 80;
+    int centerX = col * blockSize + blockSize / 2;
+    int centerY = row * blockSize + blockSize / 2;
+
+    // 随机选择特效 (可以根据喜好调整概率)
+    int randomChance = QRandomGenerator::global()->bounded(100);
+    QString effectImagePath = (randomChance < 50) ? ":/res/bomb/effect_neon.png" : ":/res/bomb/effect_glitch.png";
+
+    QLabel *effectLabel = new QLabel(this);
+    effectLabel->setPixmap(QPixmap(effectImagePath));
+    effectLabel->setScaledContents(true);
+    effectLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+    // 👇【核心修复 1】：必须置于顶层，防止被其他方块盖住！
+    effectLabel->raise();
+    effectLabel->show();
+
+    QGraphicsOpacityEffect *opacityEffect = new QGraphicsOpacityEffect(effectLabel);
+    effectLabel->setGraphicsEffect(opacityEffect);
+
+    QParallelAnimationGroup *animGroup = new QParallelAnimationGroup(effectLabel);
+
+    // 👇【核心修复 2】：加大尺寸对抗透明边缘，500像素大概能覆盖 6x6 的范围
+    double ratio = 1.833;
+    int targetWidth = 500;
+    int targetHeight = static_cast<int>(targetWidth / ratio);
+
+    // 动画 A：缩放动画
+    QPropertyAnimation *scaleAnim = new QPropertyAnimation(effectLabel, "geometry");
+    scaleAnim->setDuration(800); // 稍微延长一点时间，看清细节
+    scaleAnim->setStartValue(QRect(centerX, centerY, 0, 0));
+    scaleAnim->setEndValue(QRect(centerX - targetWidth / 2, centerY - targetHeight / 2, targetWidth, targetHeight));
+    // 👇【核心修复 3】：换成 OutBack 曲线！它会“轰”地一下猛然放大甚至超出一点，再缩回来，极具爆炸的爽感！
+    scaleAnim->setEasingCurve(QEasingCurve::OutBack);
+
+    // 动画 B：渐隐动画
+    QPropertyAnimation *fadeAnim = new QPropertyAnimation(opacityEffect, "opacity");
+    fadeAnim->setDuration(800);
+    // 👇【核心修复 4】：使用关键帧！前 60% 的时间保持绝对清晰，最后 40% 的时间再瞬间消散！
+    fadeAnim->setKeyValueAt(0.0, 1.0);
+    fadeAnim->setKeyValueAt(0.6, 1.0);
+    fadeAnim->setKeyValueAt(1.0, 0.0);
+
+    animGroup->addAnimation(scaleAnim);
+    animGroup->addAnimation(fadeAnim);
+
+    connect(animGroup, &QParallelAnimationGroup::finished, effectLabel, &QLabel::deleteLater);
+    animGroup->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+
+
+
+void GamePanel::playMagicBirdAbsorbEffect(int row, int col, QList<QPoint> targets) {
+    int blockSize = 80; // 请根据你的实际方块尺寸调整
+    int birdX = col * blockSize + blockSize / 2;
+    int birdY = row * blockSize + blockSize / 2;
+
+    // ==========================================
+    // 🎭 阶段 1：魔力鸟本体放大、蓄力
+    // ==========================================
+    QLabel *fakeBird = new QLabel(this);
+    // 👇 注意：把这里换成你项目中真实的“魔力鸟方块”的图片路径！
+    fakeBird->setPixmap(QPixmap(":/res/magic_bird.png"));
+    fakeBird->setScaledContents(true);
+    fakeBird->setAttribute(Qt::WA_TransparentForMouseEvents);
+    fakeBird->raise();
+    fakeBird->show();
+
+    QPropertyAnimation *birdScaleAnim = new QPropertyAnimation(fakeBird, "geometry");
+    birdScaleAnim->setDuration(350);
+    // 从正常的 80x80 瞬间放大到 120x120
+    birdScaleAnim->setStartValue(QRect(birdX - 40, birdY - 40, 80, 80));
+    birdScaleAnim->setEndValue(QRect(birdX - 60, birdY - 60, 120, 120));
+    birdScaleAnim->setEasingCurve(QEasingCurve::OutBack); // OutBack 会有一种“猛吸一口气弹大”的物理感
+
+    // 当阶段 1（放大）结束时，立刻触发阶段 2（吸收）
+    connect(birdScaleAnim, &QPropertyAnimation::finished, this, [=]() {
+
+        // ==========================================
+        // 💫 阶段 2：全屏同色方块化作光球，被吸入魔力鸟
+        // ==========================================
+        QParallelAnimationGroup *absorbGroup = new QParallelAnimationGroup(this);
+        QList<QLabel*> particles; // 暂存产生的光球，方便播完销毁
+
+        for (QPoint pt : targets) {
+            int targetX = pt.y() * blockSize + blockSize / 2; // y存的是col
+            int targetY = pt.x() * blockSize + blockSize / 2; // x存的是row
+
+            // 纯代码手绘一个荧光青色的发光圆球，省去加载图片的麻烦！
+            QLabel *orb = new QLabel(this);
+            orb->setFixedSize(20, 20);
+            orb->setStyleSheet("background-color: #00FFFF; border-radius: 10px; border: 2px solid #FFFFFF;");
+            orb->setAttribute(Qt::WA_TransparentForMouseEvents);
+            orb->setGeometry(targetX - 10, targetY - 10, 20, 20);
+            orb->raise();
+            orb->show();
+            particles.append(orb);
+
+            // 光球飞向魔力鸟的动画
+            QPropertyAnimation *flyAnim = new QPropertyAnimation(orb, "geometry");
+            flyAnim->setDuration(400); // 飞行时间
+            flyAnim->setStartValue(QRect(targetX - 10, targetY - 10, 20, 20));
+            flyAnim->setEndValue(QRect(birdX - 10, birdY - 10, 20, 20));
+            flyAnim->setEasingCurve(QEasingCurve::InCubic); // InCubic：起步慢，靠近中心时突然加速，像黑洞吸入！
+
+            absorbGroup->addAnimation(flyAnim);
+        }
+
+        // 当阶段 2（吸收光球飞完）结束时，立刻触发阶段 3（大爆炸）
+        connect(absorbGroup, &QParallelAnimationGroup::finished, this, [=]() {
+            // 1. 过河拆桥：清理战场上的临时图片
+            for (QLabel* orb : particles) {
+                orb->deleteLater();
+            }
+            fakeBird->deleteLater();
+
+            // // ==========================================
+            // // 💥 阶段 3：能量饱和，终极全屏大爆炸！
+            // // ==========================================
+            // // 直接调用我们之前写好的，那个能占满整个屏幕的炫酷爆炸特效！
+            // this->playMagicBirdEffect(row, col);
+        });
+
+        // 启动阶段 2
+        if (targets.isEmpty()) {
+            emit absorbGroup->finished(); // 如果恰好全屏没有同色方块，直接引爆
+        } else {
+            absorbGroup->start(QAbstractAnimation::DeleteWhenStopped);
+        }
+    });
+
+    // 启动阶段 1
+    birdScaleAnim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+
+
+
+
+
+
+
