@@ -77,23 +77,12 @@ void GameLogic::handleSwap(QPoint p1, QPoint p2) {
             killList.insert(p1);
             killList.insert(p2);
 
-            // 👇 1. 新增：准备一个专门给 UI 播动画的坐标列表
-            QList<QPoint> animTargets;
-
-            // 👇 2. 新增：获取触发大招的魔力鸟的具体位置
-            QPoint birdPos = isBird1 ? p1 : p2;
-
             for(int r = 0; r < m_rows; ++r) {
                 for(int c = 0; c < m_cols; ++c) {
                     if (m_board[r][c].color == targetColor) killList.insert(QPoint(r, c));
-                    // 👇 3. 新增：把你原本存入 killList 的同色方块坐标，也存一份给动画列表
-                    animTargets.append(QPoint(r, c));
                 }
             }
-            // ==========================================================
-            // 👇 4. 【核心对接】：发射神级特效信号，把魔力鸟坐标和目标猎物发给界面！
-            // ==========================================================
-            emit magicBirdTriggered(birdPos.x(), birdPos.y(), animTargets);
+
         }
     } else {
         killList = findMatches();

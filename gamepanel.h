@@ -19,8 +19,7 @@ public:
 
     void setInteractive(bool interactive) { m_isInteractive = interactive; }
 
-    // 传入魔力鸟的行列，以及要吸收的同色方块坐标列表 (x存row, y存col)
-    void playMagicBirdAbsorbEffect(int row, int col, QList<QPoint> targets);
+
 
 public slots:
     // 监听逻辑层信号

@@ -815,20 +815,6 @@ void MainWindow::initConnections() {
         });
     }
 
-
-    // ==========================================
-    // 👇 新增：绑定魔力鸟三段式神级特效信号
-    // ==========================================
-    connect(m_logic, &GameLogic::magicBirdTriggered,
-            m_gamePanel, &GamePanel::playMagicBirdAbsorbEffect);
-
-    // 如果是对战模式（右侧也有一个镜像或AI面板），也给右侧绑上特效！
-    if (m_aiLogic && m_aiPanel) {
-        connect(m_aiLogic, &GameLogic::magicBirdTriggered,
-                m_aiPanel, &GamePanel::playMagicBirdAbsorbEffect);
-    }
-
-
 }
 // 槽函数实现
 void MainWindow::onLevelFinished(bool isWin) {
