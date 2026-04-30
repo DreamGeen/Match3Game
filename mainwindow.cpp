@@ -13,6 +13,10 @@
 #include <QTimer> // 记得包含这个
 #include <QRandomGenerator>
 #include "uihelper.h"
+#include <QPixmap>
+#include <QDateTime>
+#include <QStandardPaths>
+#include <QDir>
 
 
 MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff,bool isHost, QString targetIp ,QWidget *parent)
@@ -169,6 +173,7 @@ void MainWindow::setupSinglePlayerUI(QWidget *centralWidget) {
     panelLayout->setContentsMargins(30, 30, 30, 30);
     panelLayout->setSpacing(20);
 
+
     auto applyTextShadow = [](QWidget* widget) {
         QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(widget);
         shadow->setOffset(1, 2); shadow->setBlurRadius(5); shadow->setColor(QColor(0, 0, 0, 220));
@@ -176,19 +181,57 @@ void MainWindow::setupSinglePlayerUI(QWidget *centralWidget) {
     };
 
     QHBoxLayout *topLayout = new QHBoxLayout();
+
+
+
+    // 👇【核心新增】：给单人模式加一个“退出”按钮
+    QPushButton *exitBtn = new QPushButton("🔙 退出", boardPanel);
+    exitBtn->setCursor(Qt::PointingHandCursor);
+    exitBtn->setStyleSheet(R"(
+        QPushButton {
+            background-color: rgba(255, 255, 255, 20);
+            color: #ffffff;
+            border-radius: 15px;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 6px 15px;
+            border: 1px solid rgba(255, 255, 255, 50);
+        }
+        QPushButton:hover {
+            background-color: rgba(255, 255, 255, 50);
+            border: 1px solid #ffffff;
+        }
+    )");
+
+    // 绑定点击事件，调用你之前写好的 UIHelper 弹窗
+    connect(exitBtn, &QPushButton::clicked, this, [this](){
+        UIHelper::showCustomPopup(this, "🚪 中断演出", "确定要中断当前的演出并返回大厅吗？\n当前的得分将不会被记录。", true, [this](){
+            this->onReturnClicked(); // 调用已有的返回逻辑，它会自动处理BGM和路由
+        });
+    });
+
+    // 将按钮放在最左边
+    topLayout->addWidget(exitBtn);
+    // 👇【修改 1】：把原本的 addSpacing(20) 改成 10，或者直接删掉这行
+    topLayout->addSpacing(10);
+
+
     m_infoLabel = new QLabel(QString("🎸 %1 | 单人").arg(m_session.nickname));
     m_infoLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;");
     applyTextShadow(m_infoLabel);
 
     QHBoxLayout *targetLayout = new QHBoxLayout();
-    targetLayout->setSpacing(5);
+    targetLayout->setSpacing(5);// 这个控制的是星星和星星之间的间距
 
     m_levelTargetLabel = new QLabel("🎯 目标: 0");
+
     m_levelTargetLabel->setMinimumWidth(160);
+
     m_levelTargetLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700;");
     applyTextShadow(m_levelTargetLabel);
     targetLayout->addWidget(m_levelTargetLabel);
-    targetLayout->addSpacing(10);
+
+    targetLayout->addSpacing(15);
 
     for (int i = 0; i < 3; ++i) {
         m_starLabels[i] = new QLabel("☆");
@@ -356,8 +399,13 @@ void MainWindow::setupAIBattleUI(QWidget *centralWidget) {
     m_cancelWaitBtn->setStyleSheet(pinkNeonQss); m_cancelWaitBtn->setCursor(Qt::PointingHandCursor);
     m_surrenderBtn->setStyleSheet(redNeonQss);   m_surrenderBtn->setCursor(Qt::PointingHandCursor);
 
-    // 初始状态：认输隐藏。如果不是网络模式，取消等待也隐藏
-    m_surrenderBtn->hide();
+    // 👇 修改：如果是纯 AI 对战，直接亮出认输按钮！
+    if (m_currentMode == GameMode::AI) {
+        m_surrenderBtn->show();
+    } else {
+        m_surrenderBtn->hide(); // 联机模式依然保持隐藏，等连上人再显示
+    }
+
     if (m_currentMode != GameMode::Online) m_cancelWaitBtn->hide();
 
     // 把按钮塞进 VS 布局的中间
@@ -748,33 +796,74 @@ void MainWindow::initConnections() {
             onLevelFinished(false);          // 弹出失败面板
         });
     }
+
+    // ==========================================
+    // 👇 新增：AI 模式专属的认输功能绑定
+    // ==========================================
+    if (m_currentMode == GameMode::AI && m_surrenderBtn) {
+        connect(m_surrenderBtn, &QPushButton::clicked, this, [this](){
+            // 弹出极具赛博朋克感的确认框
+            UIHelper::showCustomPopup(this, "🏳️ 终止演奏", "确定要放弃这场人机对决吗？\n机器的算力确实令人畏惧...", true, [this](){
+                if (m_aiLogic) {
+                    m_aiLogic->endAndSaveGame(true); // 让 AI 判定为赢
+                }
+                m_logic->endAndSaveGame(false); // 强制判自己输
+
+                // 停止游戏并弹出结算面板
+                onLevelFinished(false);
+            });
+        });
+    }
+
+
+
+
 }
 // 槽函数实现
 void MainWindow::onLevelFinished(bool isWin) {
     m_mediaPlayer->stop(); // 游戏结束，停止视频
+    m_videoView->hide();
 
-
-     m_videoView->hide();
-
+    // 1. 设置标题
     if (isWin) {
-        if (m_currentLevelIndex < m_levels.size() - 1) {
-            m_resultTitle->setText("✨ 演出大成功 ✨");
-            m_resultTitle->setStyleSheet("font-size: 40px; color: #00FF7F; font-weight: 900; background: transparent;");
-            m_nextBtn->show();
-        } else {
-            m_resultTitle->setText("🏆 巡演完美收官！");
-            m_resultTitle->setStyleSheet("font-size: 40px; color: #FFD700; font-weight: 900; background: transparent;");
-            m_nextBtn->hide(); // 已经是最后一关，不显示下一关
-        }
+        m_resultTitle->setText(m_currentLevelIndex < m_levels.size() - 1 ? "✨ 演出大成功 ✨" : "🏆 巡演完美收官！");
+        m_resultTitle->setStyleSheet("font-size: 40px; color: #00FF7F; font-weight: 900; background: transparent;");
     } else {
         m_resultTitle->setText("🌧 演出中断...");
         m_resultTitle->setStyleSheet("font-size: 40px; color: #FF4500; font-weight: 900; background: transparent;");
+    }
+
+    // 2. 按钮显隐逻辑分流
+    if (m_currentMode == GameMode::Online) {
+        // 网络模式：点赞 + 截图
+        m_nextBtn->setText("👍 为对手点赞");
+        m_nextBtn->setEnabled(true);
+        m_nextBtn->show();
+        m_restartBtn->setText("📷 演出留影");
+        m_restartBtn->show();
+    }
+    else if (m_currentMode == GameMode::AI) {
+        // 👇【核心修改】：人机模式无论输赢，都隐藏“下一场演出”按钮
         m_nextBtn->hide();
+        m_restartBtn->setText("🔄 重新开始");
+        m_restartBtn->show();
+    }
+    else {
+        // 单人闯关模式：逻辑不变，赢了且有下一关才显示
+        m_nextBtn->setText("🎸 下一场演出");
+        m_restartBtn->setText("🔄 重新开始");
+        m_restartBtn->show();
+
+        if (isWin && m_currentLevelIndex < m_levels.size() - 1) {
+            m_nextBtn->show();
+        } else {
+            m_nextBtn->hide();
+        }
     }
 
     m_resultScore->setText(QString("最终得分: %1").arg(m_logic->getCurrentScore()));
 
-    m_resultOverlay->raise(); // 必须提到最顶层，挡住所有方块
+    m_resultOverlay->raise(); // 提到最顶层
     m_resultOverlay->show();
 }
 
@@ -836,11 +925,49 @@ void MainWindow::setupResultPanel() {
 }
 
 void MainWindow::onNextLevelClicked() {
+    // 👇 网络模式下，变成真实的发送点赞功能
+    if (m_currentMode == GameMode::Online) {
+        m_netManager->sendLike(); // 👈 核心：通过网络把赞发给对方！
+
+        // 弹窗提示自己发送成功
+        UIHelper::showCustomPopup(this, "👍 点赞发送", "已向对方发送了点赞！\n吉他英雄惺惺相惜！", false, [this](){
+            m_nextBtn->setEnabled(false);
+            m_nextBtn->setText("已点赞 ✔");
+        });
+        return; // 拦截执行
+    }
+
     m_resultOverlay->hide();
     loadLevel(m_currentLevelIndex + 1);
 }
 
 void MainWindow::onRestartClicked() {
+    // 👇 新增拦截：网络模式下，变身截图留影功能！
+    if (m_currentMode == GameMode::Online) {
+        // 👇 真·截图逻辑
+        QPixmap pixmap = this->grab(); // 截取整个 MainWindow 窗口
+
+        // 获取系统的“图片”文件夹路径，获取不到就放程序当前目录
+        QString path = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+        if (path.isEmpty()) path = QDir::currentPath();
+
+        // 按时间生成文件名，例如 Bocchi_Show_20260430_112045.png
+        QString fileName = path + QString("/Bocchi_Show_%1.png").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+
+        bool success = pixmap.save(fileName); // 保存到硬盘
+
+        QString msg = success ? QString("演出实况已真实保存至：\n%1").arg(fileName)
+                              : "截图保存失败，请检查文件权限！";
+
+        UIHelper::showCustomPopup(this, "📷 演出留影", msg, false, [this](){
+            m_restartBtn->setEnabled(false);
+            m_restartBtn->setText("已保存 ✔");
+        });
+        return;
+    }
+
+
+
     m_resultOverlay->hide();
     loadLevel(m_currentLevelIndex);
 }
@@ -930,6 +1057,14 @@ void MainWindow::initOnlineConnections() {
             onLevelFinished(true);
         });
 
+    });
+
+    // =====================================
+    // 5. 接收对方发来的点赞！
+    // =====================================
+    connect(m_netManager, &NetworkManager::opponentLiked, this, [this](){
+        // 收到对方的赞，用你的霓虹 UI 弹个炫酷的提示框
+        UIHelper::showCustomPopup(this, "💖 收到点赞", "对方玩家觉得你的演出太棒了，\n向你发送了一个赞 👍！", false, nullptr);
     });
 
     // 1. 联机成功后，房主负责发牌（生成种子并发送）

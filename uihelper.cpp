@@ -21,11 +21,7 @@ void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QStr
     // 2. 核心面板：采用“高级紫灰渐变” + “2px 实心霓虹边框”
     QFrame *panel = new QFrame(overlay);
     panel->setObjectName("popupPanel"); // 加上 ID 选择器防止样式污染子控件
-
-    // 👇 修改这里：把原本的 450, 260 放大！
-    // 推荐比例：宽 540，高 300 (或者 560x320，你可以根据你的屏幕感觉微调)
-    panel->setFixedSize(540, 300);
-
+    panel->setFixedSize(450, 260);
 
     // 根据是警告还是提示，决定主题色
     QString themeColor = isQuestion ? "#FF4500" : "#00FFFF";
@@ -49,11 +45,8 @@ void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QStr
     panel->setGraphicsEffect(glow);
 
     QVBoxLayout *layout = new QVBoxLayout(panel);
-    // 👇 把内边距稍微加大一点，从 35 改成 40，让它离发光边缘远一点，更有留白感
-    layout->setContentsMargins(40, 40, 40, 40);
-    // 👇 控件之间的间距也可以稍微拉开一点，从 20 改成 25
-    layout->setSpacing(25);
-
+    layout->setContentsMargins(35, 35, 35, 35);
+    layout->setSpacing(20);
 
     // 3. 标题与文字：加大字间距
     QLabel *titleLabel = new QLabel(title, panel);

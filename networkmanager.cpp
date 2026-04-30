@@ -169,6 +169,8 @@ void NetworkManager::onReadyRead() {
                 emit opponentScoreUpdated(json["score"].toInt());
             }else if (type == "surrender") { // 👈 新增认输解析
                 emit opponentSurrendered();
+            }else if (type == "like") {  // 👇 新增：如果收到对方的点赞指令
+                emit opponentLiked();
             }
         }
     }
@@ -186,3 +188,8 @@ void NetworkManager::sendSurrender() {
     sendJson(json);
 }
 
+void NetworkManager::sendLike() {
+    QJsonObject json;
+    json["type"] = "like";
+    sendJson(json);
+}

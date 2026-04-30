@@ -37,6 +37,8 @@ public:
     // 发送认输指令
     void sendSurrender();
 
+    void sendLike(); // 👈 新增：发送点赞指令
+
 signals:
     void connectedToOpponent(); // 联机成功
     void disconnected();        // 对方掉线
@@ -50,6 +52,8 @@ signals:
     void roomFound(const QString &ip, const QString &roomName);
 
     void opponentSurrendered(); // 👈 新增：对方认输信号
+
+    void opponentLiked(); // 👈 新增：收到对方点赞信号
 
 private slots:
     void onNewConnection();
