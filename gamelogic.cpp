@@ -43,7 +43,9 @@ void GameLogic::startNewGame(int userId, GameMode mode) {
         for(int c=0; c<m_cols; ++c) {
             int color;
             do {
-                color = QRandomGenerator::global()->bounded(1, 6);
+                // 👇 关键修复：改用你受控的 m_random 引擎！
+                // 为了严谨，建议顺手换成 GameConfig::COLOR_COUNT + 1
+                color = m_random.bounded(1, GameConfig::COLOR_COUNT + 1);
             } while ((r >= 2 && m_board[r-1][c].color == color && m_board[r-2][c].color == color) ||
                      (c >= 2 && m_board[r][c-1].color == color && m_board[r][c-2].color == color));
             m_board[r][c] = {color, SpecialType::None};
@@ -613,7 +615,8 @@ void GameLogic::shuffleBoard() {
 
     // 随机交换位置
     for (int i = 0; i < validPositions.size(); ++i) {
-        int swapIdx = rand() % validPositions.size();
+        // 👇 关键修复：把不受控的 rand() 替换掉
+        int swapIdx = m_random.bounded(static_cast<int>(validPositions.size()));
         std::swap(m_board[validPositions[i].x()][validPositions[i].y()],
                   m_board[validPositions[swapIdx].x()][validPositions[swapIdx].y()]);
     }

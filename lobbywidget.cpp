@@ -151,9 +151,14 @@ void LobbyWidget::initUI() {
 
     // 按钮区
     QPushButton *hostBtn = new QPushButton("🎸 创建我的 Livehouse", m_onlineMenuWidget);
+
+
     QPushButton *onlineBackBtn = new QPushButton("⬅ 返回菜单", m_onlineMenuWidget);
 
     hostBtn->setStyleSheet(btnStyle); hostBtn->setCursor(Qt::PointingHandCursor);
+
+
+
     onlineBackBtn->setStyleSheet(backBtn->styleSheet()); onlineBackBtn->setCursor(Qt::PointingHandCursor);
 
     onlineLayout->addWidget(onlineTitle);
@@ -167,6 +172,8 @@ void LobbyWidget::initUI() {
     // 绑定第 3 页的信号
     // ==========================================
     connect(hostBtn, &QPushButton::clicked, this, &LobbyWidget::onHostRoomClicked);
+
+
     // 这里复用了返回菜单槽函数，一并处理停止雷达的逻辑
     connect(onlineBackBtn, &QPushButton::clicked, this, &LobbyWidget::onBackToMenuClicked);
     // 列表点击事件
@@ -285,6 +292,22 @@ void LobbyWidget::onUdpReadyRead() {
                     }
                 }
 
+                QString formattedRoomName = QString("🎵 %1").arg(roomName);
+                // 检查列表里是不是已经有这个名字的房间了
+                for (int i = 0; i < m_roomList->count(); ++i) {
+                    if (m_roomList->item(i)->text() == formattedRoomName) {
+                        alreadyExists = true;
+
+                        // 👇 【神级修复】：如果房间已存在，且新收到的 IP 是 127.0.0.1
+                        // 说明玩家是在同一台电脑上双开测试，优先使用本地回环地址覆盖！
+                        if (hostIp == "127.0.0.1") {
+                            m_roomList->item(i)->setData(Qt::UserRole, hostIp);
+                        }
+
+                        break;
+                    }
+                }
+
                 if (!alreadyExists) {
                     // 👇 UI 升级：如果第一行是咱们的不可点击占位符，就清空它
                     if (m_roomList->count() > 0 && m_roomList->item(0)->flags() == Qt::NoItemFlags) {
@@ -318,4 +341,9 @@ void LobbyWidget::onRoomSelected(QListWidgetItem *item) {
 
     // 发射加入信号 (isHost = false)
     emit onlineGameRequested(m_session, false, targetIp);
+}
+
+void LobbyWidget::openRadar() {
+    // onOnlineClicked 里面已经包含了清空列表、显示扫描中动画、切到第3页并启动雷达的代码！
+    onOnlineClicked();
 }

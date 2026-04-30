@@ -35,6 +35,7 @@ protected:
 
 signals:
     void returnToLobbyRequested(); // 【新增】返回大厅信号
+    void returnToRadarRequested(); // 👇 新增：专属退回雷达信号
 
 private slots:
     void updateScoreLabel(int score);
@@ -131,6 +132,9 @@ private:
 
 
     QLabel *m_aiInfoLabel; // 👈 新增：用于动态修改对手的名字
+
+    QPushButton *m_cancelWaitBtn = nullptr; // 取消等待按钮
+    QPushButton *m_surrenderBtn = nullptr;  // 认输按钮
 
 };
 

@@ -12,6 +12,7 @@
 #include <QStyle>
 #include <QTimer> // 记得包含这个
 #include <QRandomGenerator>
+#include "uihelper.h"
 
 
 MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff,bool isHost, QString targetIp ,QWidget *parent)
@@ -40,27 +41,20 @@ MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff,boo
     }
 
 
-    // 👇 处理网络模式的启动逻辑
+    // 👇 1. 处理网络管理器的初始化（但不在这里画 UI 和连信号）
     if (m_currentMode == GameMode::Online) {
         m_netManager = new NetworkManager(this);
-
         if (m_isHost) {
-            // 我是房主：使用当前玩家的昵称建房，监听 8888 端口
             QString roomName = m_session.username + " 的Livehouse";
             m_netManager->hostGame(roomName, 8888);
         } else {
-            // 我是客机：连接到传进来的目标 IP
             m_netManager->joinGame(m_targetIp, 8888);
         }
 
-        // 复用 AI 的双面板 UI，并初始化网络信号绑定
         m_aiLogic = new GameLogic(GameConfig::BOARD_ROWS, GameConfig::BOARD_COLS, this);
         m_aiLogic->setBotMode(true);
         m_aiPanel = new GamePanel(m_aiLogic, this);
         m_aiPanel->setInteractive(false);
-
-        setupAIBattleUI(centralWidget());
-        initOnlineConnections(); // 你之前写好的同步坐标和种子的函数
     }
 
     // ==========================================
@@ -81,6 +75,11 @@ MainWindow::MainWindow(UserSession session, GameMode mode, AIDifficulty diff,boo
     setupUI();          // 调用路由入口
     setupResultPanel(); // 原样保留
     initConnections();  // 这里处理了胜负结算逻辑分流
+
+    // 💡 只有等 setupUI 把所有按钮都画出来了，我们再去绑定网络专属的按钮信号！
+    if (m_currentMode == GameMode::Online) {
+        initOnlineConnections();
+    }
 
     // 找到这段代码，修改为：
     // 根据模式决定初始关卡
@@ -316,8 +315,56 @@ void MainWindow::setupAIBattleUI(QWidget *centralWidget) {
     QLabel *vsLabel = new QLabel("VS"); vsLabel->setStyleSheet("font-size: 60px; font-weight: 900; color: #FFD700; font-style: italic;"); applyTextShadow(vsLabel);
     QFrame *vLineBottom = new QFrame(); vLineBottom->setFrameShape(QFrame::VLine); vLineBottom->setStyleSheet("border: 2px dashed rgba(255,105,180, 150);");
 
+
+    // 👇 1. 重新创建取消建房和认输按钮（换成更圆润的尺寸）
+    m_cancelWaitBtn = new QPushButton("🔙 取消等待", centralWidget);
+    m_surrenderBtn = new QPushButton("🏳️ 拔线认输", centralWidget);
+
+    // 🌟 霓虹粉样式（取消等待）
+    QString pinkNeonQss = R"(
+        QPushButton {
+            background-color: rgba(255, 105, 180, 30);
+            color: #ffffff;
+            border-radius: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 12px 25px;
+            border: 2px solid #ff69b4;
+        }
+        QPushButton:hover {
+            background-color: #ff69b4;
+            border: 2px solid #ffffff;
+        }
+        QPushButton:pressed { background-color: #c71585; }
+    )";
+
+    // 🌟 警示红样式（认输按钮）- 完美融入面板
+    QString redNeonQss = R"(
+        QPushButton {
+            background-color: rgba(0, 0, 0, 80); /* 👈 与游戏面板完全一致的通透暗度 */
+            color: #ff4500;
+            border-radius: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 12px 25px;
+            border: 1px solid rgba(255, 69, 0, 80); /* 微光边框 */
+        }
+        QPushButton:hover { background-color: rgba(255, 69, 0, 40); border: 1px solid #ff4500; }
+        QPushButton:pressed { background-color: rgba(255, 69, 0, 80); color: white; }
+    )";
+
+    m_cancelWaitBtn->setStyleSheet(pinkNeonQss); m_cancelWaitBtn->setCursor(Qt::PointingHandCursor);
+    m_surrenderBtn->setStyleSheet(redNeonQss);   m_surrenderBtn->setCursor(Qt::PointingHandCursor);
+
+    // 初始状态：认输隐藏。如果不是网络模式，取消等待也隐藏
+    m_surrenderBtn->hide();
+    if (m_currentMode != GameMode::Online) m_cancelWaitBtn->hide();
+
+    // 把按钮塞进 VS 布局的中间
     vsLayout->addWidget(vLineTop, 1, Qt::AlignHCenter);
     vsLayout->addWidget(vsLabel, 0, Qt::AlignHCenter);
+    vsLayout->addWidget(m_cancelWaitBtn, 0, Qt::AlignHCenter); // 👈 加在这里
+    vsLayout->addWidget(m_surrenderBtn, 0, Qt::AlignHCenter);  // 👈 加在这里
     vsLayout->addWidget(vLineBottom, 1, Qt::AlignHCenter);
 
     mainLayout->addWidget(playerPanel, 0, Qt::AlignRight | Qt::AlignVCenter);
@@ -357,27 +404,30 @@ void MainWindow::loadLevel(int index) {
 
 
 
-    // 2. 如果是对战模式，修改这份【拷贝】的目标分数
-    if (m_currentMode == GameMode::AI) {
+    // 2. 如果是对战模式（AI或网络），修改这份【拷贝】的目标分数
+    // 👇 修改：加上网络模式的判断
+    if (m_currentMode == GameMode::AI || m_currentMode == GameMode::Online) {
         cfg.targetScore = qMax(cfg.targetScore * 3, 3000);
     }
 
-
-    // 👇 1. 动态决定步数：如果是 AI 模式，直接给 999 步！否则保持原关卡步数
-    int maxMoves = (m_currentMode == GameMode::AI) ? 999 : cfg.maxMoves;
+    // 👇 1. 动态决定步数：如果是 AI 模式或网络模式，直接给 999 步！否则保持原关卡步数
+    // 👇 修改：加上网络模式的判断
+    int maxMoves = (m_currentMode == GameMode::AI || m_currentMode == GameMode::Online) ? 999 : cfg.maxMoves;
 
     // 👇 2. 把算好的 maxMoves 传给玩家！
     m_logic->startLevel(m_session.uid, m_currentMode, cfg.targetScore, maxMoves);
 
 
-    // 如果是AI模式，启动对手逻辑
-    if (m_currentMode == GameMode::AI && m_aiLogic) {
+    // 👇 修改为：如果是 AI 模式 或 网络联机模式，都要启动右侧对手的引擎！
+    if ((m_currentMode == GameMode::AI || m_currentMode == GameMode::Online) && m_aiLogic) {
         m_aiScoreLabel->setText("🎵 得分: 0");
-        // 👇 3. 把算好的 maxMoves 也传给 AI！
         m_aiLogic->startLevel(0, m_currentMode, cfg.targetScore, maxMoves);
 
-        // 【修改】：给玩家一点“先手优势”，开局 2.5 秒后 AI 才开始发起第一次攻击（原来是 1.5 秒）
-        QTimer::singleShot(2500, m_aiLogic, &GameLogic::triggerNextBotMove);
+        // 👇 重点：只有纯 AI 模式才需要定时器触发机器人自己下棋！
+        // 网络模式的移动指令是靠对面真实玩家发包传过来的，不需要自动触发！
+        if (m_currentMode == GameMode::AI) {
+            QTimer::singleShot(2500, m_aiLogic, &GameLogic::triggerNextBotMove);
+        }
     }
 
 
@@ -652,8 +702,8 @@ void MainWindow::initConnections() {
             )");
         }
 
-        // 👇【核心修复】：AI 模式下赢了之后的专属“狂欢处理”
-        if (m_currentMode == GameMode::AI) {
+        // 👇【核心修改】：AI 模式 或 网络模式下赢了之后的专属“狂欢处理”
+        if (m_currentMode == GameMode::AI|| m_currentMode == GameMode::Online) {
             // 1. 强杀对手：停掉AI的行动，并把右边的棋盘直接隐藏！
             if (m_aiLogic) m_aiLogic->endAndSaveGame(false);
             QFrame* aiPanel = centralWidget()->findChild<QFrame*>("aiBoardPanel");
@@ -672,8 +722,8 @@ void MainWindow::initConnections() {
 
 
 
-    // 【新增】AI 信号绑定
-    if (m_currentMode == GameMode::AI && m_aiLogic) {
+    // 👇 【核心修改】：把 AI 专属判断，扩大为 AI 和 网络 都能用
+    if ((m_currentMode == GameMode::AI || m_currentMode == GameMode::Online) && m_aiLogic) {
         // AI计分更新
         connect(m_aiLogic, &GameLogic::scoreUpdated, this, [this](int score){
             m_aiScoreLabel->setText(QString("🎵 得分: %1").arg(score));
@@ -682,18 +732,20 @@ void MainWindow::initConnections() {
         // AI算力路由到面板
         connect(m_aiLogic, &GameLogic::aiMoveDecided, m_aiPanel, &GamePanel::onAiMoveDecided);
 
-        // 面板播完动画后，路由回AI触发下一步
-        connect(m_aiPanel, &GamePanel::actionFinished, this, [this](){
-            if (!m_aiLogic->isGameOver() && !m_logic->isGameOver()) {
-                QTimer::singleShot(m_aiDelay, m_aiLogic, &GameLogic::triggerNextBotMove);
-            }
-        });
+        // 👇 重点防坑：只有纯 AI 模式才需要动画播完后触发下一步！联机是等真人手速的！
+        if (m_currentMode == GameMode::AI) {
+            connect(m_aiPanel, &GamePanel::actionFinished, this, [this](){
+                if (!m_aiLogic->isGameOver() && !m_logic->isGameOver()) {
+                    QTimer::singleShot(m_aiDelay, m_aiLogic, &GameLogic::triggerNextBotMove);
+                }
+            });
+        }
 
-        // AI抢先达到目标分 -> AI胜利
+        // 对手（机器或真人）抢先达到目标分 -> 对方胜利
         connect(m_aiLogic, &GameLogic::targetReached, this, [this](){
-            m_aiLogic->endAndSaveGame(true); // 🚨 关键修复：AI 赢了之后也要强行杀死它自己，停止后台计算！
-            m_logic->endAndSaveGame(false); // 判定玩家失败
-            onLevelFinished(false);         // 直接弹结算框：输了
+            m_aiLogic->endAndSaveGame(true); // 🚨 强杀后台计算
+            m_logic->endAndSaveGame(false);  // 判定我方失败
+            onLevelFinished(false);          // 弹出失败面板
         });
     }
 }
@@ -800,7 +852,12 @@ void MainWindow::onReturnClicked() {
     if (bgm && !bgm->isPlaying()) {
         bgm->play();
     }
-    emit returnToLobbyRequested(); // 通知主程序切回大厅
+    // 👇【核心修改】：智能判断该退回哪里
+    if (m_currentMode == GameMode::Online) {
+        emit returnToRadarRequested(); // 在线模式，退回雷达并重新扫描
+    } else {
+        emit returnToLobbyRequested(); // 单人/AI模式，退回主菜单
+    }
 }
 
 
@@ -811,10 +868,75 @@ void MainWindow::onReturnClicked() {
 void MainWindow::initOnlineConnections() {
     if (!m_netManager) return;
 
+
+    // =====================================
+    // 1. 取消等待按钮：复用已有的返回逻辑
+    // =====================================
+    if (m_cancelWaitBtn) {
+        connect(m_cancelWaitBtn, &QPushButton::clicked, this, [this](){
+            // 断开网络后再返回，防止触发 disconnected 信号导致的“判负”弹窗
+            if (m_netManager) {
+                m_netManager->disconnect();
+                m_netManager->deleteLater();
+                m_netManager = nullptr;
+            }
+            this->onReturnClicked(); // 执行停止视频、恢复BGM并退回大厅
+        });
+    }
+
+    // =====================================
+    // 2. 掉线立即判负逻辑
+    // =====================================
+    connect(m_netManager, &NetworkManager::disconnected, this, [this](){
+        // 判定：只有在游戏已经开始（认输按钮可见）且 结果面板还没弹出来时，断线才算输
+        if (m_surrenderBtn && m_surrenderBtn->isVisible() && m_resultOverlay && !m_resultOverlay->isVisible()) {
+
+            // 👇 替换在这里：调用 UIHelper
+            UIHelper::showCustomPopup(this, "🔌 信号中断", "与对方失去连接！\n由于演出尚未结束，判定本场演出中断。", false, [this](){
+                if (m_aiLogic) m_aiLogic->endAndSaveGame(false);
+                m_logic->endAndSaveGame(false); // 强判自己输
+                onLevelFinished(false);         // 弹结算框
+            });
+
+        }
+    });
+
+
+    // =====================================
+    // 3. 认输功能实现
+    // =====================================
+    if (m_surrenderBtn) {
+        connect(m_surrenderBtn, &QPushButton::clicked, this, [this](){
+
+            // 👇 替换在这里：调用 UIHelper，注意第三个参数是 true（显示确认/取消按钮）
+            UIHelper::showCustomPopup(this, "🏳️ 拔线认输", "确定要提前结束这场演出吗？\n你将被判定为失败！", true, [this](){
+                m_netManager->sendSurrender();
+                m_logic->endAndSaveGame(false);
+                onLevelFinished(false);
+            });
+
+        });
+    }
+
+    // =====================================
+    // 4. 接收对方认输的信号
+    // =====================================
+    connect(m_netManager, &NetworkManager::opponentSurrendered, this, [this](){
+
+        // 👇 替换在这里：调用 UIHelper
+        UIHelper::showCustomPopup(this, "🏆 演出不战而胜", "🎸 对方吉他弦断了（已离场）！\n恭喜你直接获得本场胜利！", false, [this](){
+            if (m_aiLogic) m_aiLogic->endAndSaveGame(false);
+            m_logic->endAndSaveGame(true); // 强判自己赢
+            onLevelFinished(true);
+        });
+
+    });
+
     // 1. 联机成功后，房主负责发牌（生成种子并发送）
     connect(m_netManager, &NetworkManager::connectedToOpponent, this, [this](){
         if (m_netManager->isHost()) {
-            quint32 seed = QDateTime::currentMSecsSinceEpoch(); // 取时间戳做种子
+            // 👇 修复这里：不要用时间戳，直接生成一个 1 到 9999999 的安全整数
+            quint32 seed = QRandomGenerator::global()->bounded(1, 9999999);
             // 发送我的昵称给对方
             m_netManager->sendGameStart(seed, m_session.nickname);
             // 房主本地显示名暂时不用改（因为右边本来就是等对方），或者直接设为"等待中"
@@ -840,10 +962,10 @@ void MainWindow::initOnlineConnections() {
         m_netManager->sendSwapAction(p1, p2);
     });
 
-    // 我方分数同步给对方
-    connect(m_logic, &GameLogic::scoreUpdated, this, [this](int score){
-        m_netManager->sendScoreUpdate(score);
-    });
+    // // 我方分数同步给对方
+    // connect(m_logic, &GameLogic::scoreUpdated, this, [this](int score){
+    //     m_netManager->sendScoreUpdate(score);
+    // });
 
     // 4. 接收对方的操作，让右侧（对手）面板动起来
     connect(m_netManager, &NetworkManager::opponentSwapped, this, [this](QPoint p1, QPoint p2){
@@ -859,6 +981,9 @@ void MainWindow::initOnlineConnections() {
             m_aiScoreLabel->setText(QString("🎵 对手得分: %1").arg(score));
         }
     });
+
+
+
 }
 
 void MainWindow::startGameWithSeed(quint32 seed, const QString &name) {
@@ -873,9 +998,14 @@ void MainWindow::startGameWithSeed(quint32 seed, const QString &name) {
         m_logic->setRandomSeed(seed);
         m_aiLogic->setRandomSeed(seed);
 
-        // 调用你现有的加载关卡函数
+        // 👇 新增这两行：开局后隐藏返回按钮，亮出认输按钮！
+        if (m_cancelWaitBtn) m_cancelWaitBtn->hide();
+        if (m_surrenderBtn) m_surrenderBtn->show();
+
+        // 👇【核心修改】：利用双方绝对一致的种子，算出同一个随机关卡！
+        m_currentLevelIndex = seed % m_levels.size();
         loadLevel(m_currentLevelIndex);
 
-        qDebug() << ">>> 联机对战正式开始，随机数种子：" << seed;
+       qDebug() << ">>> 联机对战正式开始，随机数种子：" << seed << "，关卡：" << m_currentLevelIndex;
     }
 }

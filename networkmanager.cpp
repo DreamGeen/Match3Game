@@ -39,13 +39,20 @@ void NetworkManager::broadcastRoomInfo() {
 
     QByteArray data = QJsonDocument(json).toJson(QJsonDocument::Compact);
 
-    // 向局域网内的 8889 端口广播
+    // 👇 修改这里：采用“双轨广播机制”
+
+    // 1. 向真实的局域网内广播（用于两台不同电脑联机）
     m_udpSocket->writeDatagram(data, QHostAddress::Broadcast, m_udpPort);
+
+    // 2. 强制向本机回环地址广播（专为毕业设计单机双开展示准备！）
+    m_udpSocket->writeDatagram(data, QHostAddress::LocalHost, m_udpPort);
 }
 
 // 房主等到有人连进来后，立刻闭嘴，不再广播
 void NetworkManager::onNewConnection() {
     if (m_server->hasPendingConnections()) {
+        m_broadcastTimer->stop(); // 👈 关键修复：有人进房间了，赶紧关掉大喇叭！
+
         m_socket = m_server->nextPendingConnection();
         connect(m_socket, &QTcpSocket::readyRead, this, &NetworkManager::onReadyRead);
         connect(m_socket, &QTcpSocket::disconnected, this, &NetworkManager::disconnected);
@@ -160,11 +167,22 @@ void NetworkManager::onReadyRead() {
                 emit gameStartReceived(seed, oppName); // 👈 传给信号
             } else if (type == "score") {
                 emit opponentScoreUpdated(json["score"].toInt());
+            }else if (type == "surrender") { // 👈 新增认输解析
+                emit opponentSurrendered();
             }
         }
     }
 }
 
 void NetworkManager::onSocketError(QAbstractSocket::SocketError error) {
-    qDebug() << "Network Error:" << error;
+    qDebug() << "Network Error:" << error << m_socket->errorString();
+    // 弹个窗让你一眼看出死因
+    // QMessageBox::warning(nullptr, "连接异常", QString("网络报错：%1").arg(m_socket->errorString()));
 }
+
+void NetworkManager::sendSurrender() {
+    QJsonObject json;
+    json["type"] = "surrender";
+    sendJson(json);
+}
+

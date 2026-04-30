@@ -34,6 +34,9 @@ public:
     // 发送实时分数
     void sendScoreUpdate(int score);
 
+    // 发送认输指令
+    void sendSurrender();
+
 signals:
     void connectedToOpponent(); // 联机成功
     void disconnected();        // 对方掉线
@@ -45,6 +48,8 @@ signals:
 
     // 👈 新增：当搜索到附近有房间时触发，抛出给 UI 显示
     void roomFound(const QString &ip, const QString &roomName);
+
+    void opponentSurrendered(); // 👈 新增：对方认输信号
 
 private slots:
     void onNewConnection();

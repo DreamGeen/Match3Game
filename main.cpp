@@ -74,6 +74,17 @@ int main(int argc, char *argv[]) {
                 mainStage->removeWidget(gameWin);
                 gameWin->deleteLater();
             });
+
+            // 👇【新增这段代码】：专门处理退回雷达的请求
+            QObject::connect(gameWin, &MainWindow::returnToRadarRequested, [=]() {
+                lobbyWin->refreshScore();
+
+                lobbyWin->openRadar(); // 🌟 神奇魔法：让大厅直接翻到第3页，并启动 UDP 扫描！
+
+                mainStage->setCurrentWidget(lobbyWin);
+                mainStage->removeWidget(gameWin);
+                gameWin->deleteLater();
+            });
         });
 
 

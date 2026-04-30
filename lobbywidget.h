@@ -21,6 +21,9 @@ public:
     explicit LobbyWidget(UserSession session, QWidget *parent = nullptr);
     void refreshScore();
 
+    // 👇 新增：外部调用此函数，可直接切回雷达页面并开启扫描
+    void openRadar();
+
 signals:
     // 当玩家选择某种模式时发出信号
     // 【修改】：增加 AIDifficulty 参数，默认值为 Normal
