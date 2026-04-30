@@ -5,10 +5,20 @@
 #include <QPushButton>
 #include <QGraphicsDropShadowEffect> // 👈 新增：用于制造弹窗的霓虹发光效果
 
-void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QString& msg, bool isQuestion, std::function<void()> onConfirm) {
+#include "uihelper.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QGraphicsDropShadowEffect>
+
+// =========================================================================
+// 🌟 1. 核心干活的新版本：彻底解耦了颜色和按钮数量
+// =========================================================================
+void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QString& msg, PopupType type, std::function<void()> onConfirm) {
     if (!parent) return;
 
-    // 1. 全屏遮罩：稍微调亮一点，不要把整个屏幕压得死黑 (210 -> 160)
+    // 1. 全屏遮罩
     QFrame *overlay = new QFrame(parent);
     overlay->setObjectName("popupOverlay");
     overlay->setGeometry(0, 0, parent->width(), parent->height());
@@ -18,37 +28,37 @@ void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QStr
 
     QVBoxLayout *overlayLayout = new QVBoxLayout(overlay);
 
-    // 2. 核心面板：采用“高级紫灰渐变” + “2px 实心霓虹边框”
+    // 2. 核心面板
     QFrame *panel = new QFrame(overlay);
-    panel->setObjectName("popupPanel"); // 加上 ID 选择器防止样式污染子控件
+    panel->setObjectName("popupPanel");
     panel->setFixedSize(450, 260);
 
-    // 根据是警告还是提示，决定主题色
-    QString themeColor = isQuestion ? "#FF4500" : "#00FFFF";
-    QString themeColorRgba = isQuestion ? "rgba(255, 69, 0, 180)" : "rgba(0, 255, 255, 180)";
+    // 👇 颜色解耦：Error 和 Question 都使用红色警告主题，Info 使用青色
+    bool isRedTheme = (type == PopupType::Error || type == PopupType::Question);
+    QString themeColor = isRedTheme ? "#FF4500" : "#00FFFF";
+    QString themeColorRgba = isRedTheme ? "rgba(255, 69, 0, 180)" : "rgba(0, 255, 255, 180)";
 
     panel->setStyleSheet(QString(R"(
         QFrame#popupPanel {
-            /* 顶部稍微泛紫亮一点，底部暗下去，质感瞬间就出来了 */
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(40, 30, 45, 230), stop:1 rgba(15, 10, 20, 240));
             border-radius: 16px;
-            border: 2px solid %1; /* 加粗到 2px，这样发光才有灯管的实体 */
+            border: 2px solid %1;
         }
         QLabel { border: none; background: transparent; font-family: 'Microsoft YaHei'; }
     )").arg(themeColorRgba));
 
-    // 🌟 光学重塑：加大扩散半径，降低不透明度，去掉脏乱感
+    // 🌟 光学重塑
     QGraphicsDropShadowEffect *glow = new QGraphicsDropShadowEffect(panel);
     glow->setOffset(0, 0);
-    glow->setBlurRadius(60); // 扩散半径加大 (30 -> 60)，让光晕更柔和
-    glow->setColor(QColor(isQuestion ? QColor(255, 69, 0, 150) : QColor(0, 255, 255, 150))); // 带一点透明度的光
+    glow->setBlurRadius(60);
+    glow->setColor(QColor(isRedTheme ? QColor(255, 69, 0, 150) : QColor(0, 255, 255, 150)));
     panel->setGraphicsEffect(glow);
 
     QVBoxLayout *layout = new QVBoxLayout(panel);
     layout->setContentsMargins(35, 35, 35, 35);
     layout->setSpacing(20);
 
-    // 3. 标题与文字：加大字间距
+    // 3. 标题与文字
     QLabel *titleLabel = new QLabel(title, panel);
     titleLabel->setStyleSheet(QString("font-size: 26px; font-weight: 900; color: %1; letter-spacing: 3px;").arg(themeColor));
     titleLabel->setAlignment(Qt::AlignCenter);
@@ -57,19 +67,20 @@ void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QStr
     msgLabel->setStyleSheet("font-size: 16px; color: #E0E0E0; line-height: 1.5; font-weight: bold;");
     msgLabel->setAlignment(Qt::AlignCenter);
 
-    // 4. 按钮区：改为“空心发光灯管”风格
+    // 4. 按钮区
     QHBoxLayout *btnLayout = new QHBoxLayout();
     btnLayout->setSpacing(25);
 
-    if (isQuestion) {
+    // 👇 按钮解耦：明确是 Question 类型才生成 2 个按钮
+    if (type == PopupType::Question) {
         QPushButton *yesBtn = new QPushButton("🎸 确认操作", panel);
         yesBtn->setCursor(Qt::PointingHandCursor);
         yesBtn->setStyleSheet(R"(
             QPushButton {
-                background-color: rgba(255, 69, 0, 20); /* 极低的透明底 */
+                background-color: rgba(255, 69, 0, 20);
                 color: #ff4500;
                 border-radius: 8px;
-                border: 2px solid #ff4500; /* 纯色灯管边框 */
+                border: 2px solid #ff4500;
                 font-size: 16px; font-weight: bold; padding: 10px 20px;
             }
             QPushButton:hover { background-color: #ff4500; color: white; }
@@ -98,20 +109,37 @@ void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QStr
             if (onConfirm) onConfirm();
         });
         QObject::connect(noBtn, &QPushButton::clicked, overlay, &QObject::deleteLater);
+
     } else {
+        // 👇 Info 和 Error 都只生成 1 个确认按钮
         QPushButton *okBtn = new QPushButton("✅ 明白", panel);
         okBtn->setCursor(Qt::PointingHandCursor);
-        okBtn->setStyleSheet(R"(
-            QPushButton {
-                background-color: rgba(0, 255, 255, 20);
-                color: #00FFFF;
-                border-radius: 8px;
-                border: 2px solid #00FFFF;
-                font-size: 16px; font-weight: bold; padding: 10px 20px;
-            }
-            QPushButton:hover { background-color: #00FFFF; color: black; }
-            QPushButton:pressed { background-color: #00cccc; border: 2px solid #00cccc; }
-        )");
+
+        if (type == PopupType::Error) {
+            // Error 状态：单按钮也变成红色警告样式
+            okBtn->setStyleSheet(R"(
+                QPushButton {
+                    background-color: rgba(255, 69, 0, 20);
+                    color: #ff4500;
+                    border-radius: 8px; border: 2px solid #ff4500;
+                    font-size: 16px; font-weight: bold; padding: 10px 20px;
+                }
+                QPushButton:hover { background-color: #ff4500; color: white; }
+                QPushButton:pressed { background-color: #cc3700; border: 2px solid #cc3700; }
+            )");
+        } else {
+            // Info 状态：原有的青色提示样式
+            okBtn->setStyleSheet(R"(
+                QPushButton {
+                    background-color: rgba(0, 255, 255, 20);
+                    color: #00FFFF;
+                    border-radius: 8px; border: 2px solid #00FFFF;
+                    font-size: 16px; font-weight: bold; padding: 10px 20px;
+                }
+                QPushButton:hover { background-color: #00FFFF; color: black; }
+                QPushButton:pressed { background-color: #00cccc; border: 2px solid #00cccc; }
+            )");
+        }
 
         btnLayout->addStretch();
         btnLayout->addWidget(okBtn);
@@ -132,4 +160,13 @@ void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QStr
     overlayLayout->addWidget(panel, 0, Qt::AlignCenter);
     overlay->show();
     overlay->raise();
+}
+
+// =========================================================================
+// 🤝 2. 给旧代码用的兼容版本（适配器模式），防止旧代码报错
+// =========================================================================
+void UIHelper::showCustomPopup(QWidget* parent, const QString& title, const QString& msg, bool isQuestion, std::function<void()> onConfirm) {
+    // 悄悄把以前的 true 翻译成 Question，false 翻译成 Info，然后丢给新函数处理！
+    PopupType mappedType = isQuestion ? PopupType::Question : PopupType::Info;
+    showCustomPopup(parent, title, msg, mappedType, onConfirm);
 }

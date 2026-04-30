@@ -55,7 +55,7 @@ void GameLogic::startNewGame(int userId, GameMode mode) {
 }
 
 void GameLogic::handleSwap(QPoint p1, QPoint p2) {
-    // 👇 1. 补回：游戏结束或步数不足时，禁止操作
+    // 1. 游戏结束或步数不足时，禁止操作
     if (m_isGameOver || m_remainingMoves <= 0) return;
 
     Tile &t1 = m_board[p1.x()][p1.y()];
@@ -67,27 +67,52 @@ void GameLogic::handleSwap(QPoint p1, QPoint p2) {
     bool isBird1 = (t1.special == SpecialType::MagicBird);
     bool isBird2 = (t2.special == SpecialType::MagicBird);
 
-    if (isBird1 || isBird2) {
+    // 👇 新增标志位，记录本次是否触发了魔力鸟大招
+    bool isBirdTriggered = (isBird1 || isBird2);
+
+    // 👇 新增：专门给UI发信号用的列表和原点
+    QList<QPoint> birdTargets;
+    QPoint birdPos = isBird1 ? p1 : p2;
+
+    if (isBirdTriggered) {
         if (isBird1 && isBird2) {
-            for(int r = 0; r < m_rows; ++r)
-                for(int c = 0; c < m_cols; ++c)
+            for(int r = 0; r < m_rows; ++r) {
+                for(int c = 0; c < m_cols; ++c) {
                     killList.insert(QPoint(r, c));
+                    birdTargets.append(QPoint(r, c));
+                }
+            }
         } else {
             int targetColor = isBird1 ? t2.color : t1.color;
             killList.insert(p1);
             killList.insert(p2);
 
+           // ❌ 删除了这里原有的 birdTargets.append(p1/p2)
+
             for(int r = 0; r < m_rows; ++r) {
                 for(int c = 0; c < m_cols; ++c) {
-                    if (m_board[r][c].color == targetColor) killList.insert(QPoint(r, c));
+                    if (m_board[r][c].color == targetColor) {
+                        killList.insert(QPoint(r, c));
+                        birdTargets.append(QPoint(r, c));
+                    }
                 }
             }
-
         }
+        // ==========================================================
+        // 🌟 核心修复 1：利用 QSet (killList) 的唯一性，直接导出为列表
+        // 彻底杜绝重复坐标，保护 Qt 动画状态机安全结算！
+        // ==========================================================
+        birdTargets = killList.values();
+
+
+        // ==========================================================
+        // 🌟 核心新增：数据收集完毕，立刻通知 UI 播放吸附特效
+        // ==========================================================
+        emit magicBirdTriggered(birdPos.x(), birdPos.y(), birdTargets);
+
     } else {
         killList = findMatches();
     }
-
 
     if (killList.isEmpty()) {
         std::swap(t1, t2); // 换回来
@@ -95,25 +120,31 @@ void GameLogic::handleSwap(QPoint p1, QPoint p2) {
         return;
     }
 
-    // ==========================================================
-    // 🌐 👇 加上这三行：既然交换是合法的，发送网络同步信号！
-    // ==========================================================
-    if (!m_isBot) { // 只有玩家自己的面板才发信号，防止右侧的对手面板陷入死循环
+    if (!m_isBot) {
         emit playerSwapped(p1, p2);
     }
 
-
-    // 👇 2. 补回：既然交换是合法的，扣减步数，并重置连击数！
     m_remainingMoves--;
     emit movesUpdated(m_remainingMoves);
     m_currentCombo = 1;
 
-    // 👇 【核心修复】：如果是魔力鸟主动引爆，传入 (-1, -1) 剥夺其合成新特效的资格
-    QPoint activePoint = (isBird1 || isBird2) ? QPoint(-1, -1) : p1;
+    QPoint activePoint = isBirdTriggered ? QPoint(-1, -1) : p1;
 
-    // 错误代码：executeElimination(killList, p1);
-    // 正确修复：👇 把 p1 改成 activePoint ！！！
-    executeElimination(killList, activePoint);
+    // ==========================================================
+    // 🌟 核心修改：拦截原本瞬间执行的消除逻辑，为特效腾出表演时间
+    // ==========================================================
+    if (isBirdTriggered) {
+        // ==========================================================
+        // 🌟 核心修复 2：将后台等待时间延长至 850ms
+        // 给 UI 层的 800ms 动画留出 50ms 的从容收尾和清理画面残留的时间
+        // ==========================================================
+        QTimer::singleShot(850, this, [=]() {
+            executeElimination(killList, activePoint);
+        });
+    } else {
+        // 普通交换消除，无缝瞬间执行
+        executeElimination(killList, activePoint);
+    }
 }
 
 void GameLogic::executeElimination(QSet<QPoint> rawKillList, QPoint activePoint) {
@@ -643,4 +674,27 @@ void GameLogic::setRemainingMoves(int moves) {
 void GameLogic::setRandomSeed(quint32 seed) {
     // 使用传入的种子重置随机数引擎
     m_random = QRandomGenerator(seed);
+}
+
+
+void GameLogic::debugSpawnSpecialBlock(SpecialType type) {
+    if (m_isGameOver || m_rows <= 0 || m_cols <= 0) return;
+
+    // 随机挑一个幸运位置
+    int r = m_random.bounded(m_rows);
+    int c = m_random.bounded(m_cols);
+
+    // 强行改变它的特殊属性
+    m_board[r][c].special = type;
+
+    // 细节处理：魔力鸟无视颜色通常设为0，但其他三种炸弹是需要有基础颜色的
+    if (type == SpecialType::MagicBird) {
+        m_board[r][c].color = 0;
+    } else if (m_board[r][c].color == 0) {
+        // 如果倒霉正好随到了一个本该是空的格子（比如刚掉落还没生成的瞬间），给它硬塞个随机色
+        m_board[r][c].color = m_random.bounded(1, GameConfig::COLOR_COUNT + 1);
+    }
+
+    // 发出信号，通知 UI 立刻刷新盘面
+    emit boardChanged();
 }

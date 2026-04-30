@@ -11,6 +11,7 @@
 #include <QSoundEffect>
 #include <QPixmap>       // 【新增】：用于处理背景图片
 #include <QPaintEvent>   // 【新增】：用于重写绘图事件
+#include <QLabel>
 
 class GamePanel : public QWidget {
     Q_OBJECT
@@ -32,6 +33,8 @@ public slots:
 
     void onAiMoveDecided(QPoint p1, QPoint p2);
 
+    void onMagicBirdTriggered(int row, int col, QList<QPoint> targets);
+
 signals:
     void actionFinished(); // 这一波消除动画彻底结束的信号
 
@@ -39,6 +42,10 @@ signals:
 protected:
     // 处理玩家点击
     void mousePressEvent(QMouseEvent *event) override;
+
+    void keyPressEvent(QKeyEvent *event) override;
+
+    void paintEvent(QPaintEvent *event) override;
 
 
 private:
@@ -71,6 +78,13 @@ private:
     bool m_isInteractive = true;
 
     void playBombEffect(int row, int col);
+
+
+    // 👇 新增：用于魔力鸟黑洞特效的底层绘制控制
+    bool m_drawMagicBirdHalo = false;  // 是否开启黑洞特效
+    QPoint m_magicBirdCenter;          // 黑洞中心点
+    int m_haloCurrentSize = 0;         // 当前光晕大小
+    double m_haloOpacity = 0.0;        // 当前光晕透明度
 
 
 };

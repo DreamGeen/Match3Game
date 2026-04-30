@@ -56,6 +56,10 @@ public:
     // 👈 2. 新增：允许外部（特别是房主）强制同步随机数种子
     void setRandomSeed(quint32 seed);
 
+
+    // 开发者测试专用：在随机位置生成指定类型的特殊方块
+    void debugSpawnSpecialBlock(SpecialType type);
+
 signals:
     void scoreUpdated(int newScore);
     void specialEffectTriggered(QPoint pos, SpecialType type);
@@ -81,6 +85,9 @@ signals:
 
     // 👇 新增：告诉界面，魔力鸟要在 (row, col) 吸收 targets 里的方块了！
     void magicBirdTriggered(int row, int col, QList<QPoint> targets);
+
+
+
 
 private:
     // 核心算法模块

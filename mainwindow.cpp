@@ -246,9 +246,11 @@ void MainWindow::setupSinglePlayerUI(QWidget *centralWidget) {
     m_movesLabel->setStyleSheet("font-size: 18px; color: #00FF7F; font-weight: bold;");
     applyTextShadow(m_movesLabel);
 
-    m_scoreLabel = new QLabel("🎵 当前得分: 0");
+    // 把里面的文字改成 "🎵 分数: 0"
+    m_scoreLabel = new QLabel("🎵 得分: 0");
     m_scoreLabel->setStyleSheet("font-size: 18px; font-weight: 900; color: #ffb6c1;");
     applyTextShadow(m_scoreLabel);
+
 
     topLayout->addWidget(m_infoLabel); topLayout->addStretch();
     topLayout->addLayout(targetLayout); topLayout->addStretch();
@@ -532,7 +534,7 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 }
 
 void MainWindow::updateScoreLabel(int score) {
-    m_scoreLabel->setText(QString("🎵 当前得分: %1").arg(score));
+    m_scoreLabel->setText(QString("🎵 得分: %1").arg(score));
 
     // =======================================================
     // 🚨 终极防错防御：不查表，直接问引擎现在的满分是多少！

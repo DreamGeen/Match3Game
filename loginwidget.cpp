@@ -1,5 +1,6 @@
 #include "LoginWidget.h"
 #include <QHBoxLayout>
+#include "uihelper.h"
 
 LoginWidget::LoginWidget(QWidget *parent) : QWidget(parent) {
     this->setAttribute(Qt::WA_StyledBackground, true);
@@ -175,7 +176,8 @@ void LoginWidget::performLogin() {
     QString password = m_pwdEdit->text();
 
     if (username.isEmpty() || password.isEmpty()) {
-        QMessageBox::warning(this, "校验", "账号或密码不能为空！");
+        // 👇 完美调用：红色警告，单按钮
+        UIHelper::showCustomPopup(this, "⚠️ 校验失败", "账号或密码不能为空！", UIHelper::PopupType::Error);
         return;
     }
 
@@ -188,7 +190,8 @@ void LoginWidget::performLogin() {
         UserSession session = { uid, username, nickname, avatarId, totalScore };
         emit loginSuccess(session);
     } else {
-        QMessageBox::critical(this, "登录失败", "账号或密码不正确，请重试。");
+        // 👇 替换系统弹窗
+        UIHelper::showCustomPopup(this, "🚫 登录失败", "账号或密码不正确，请重试。", UIHelper::PopupType::Error);
     }
 }
 
@@ -200,13 +203,15 @@ void LoginWidget::performRegister() {
 
     // 1. 基础校验
     if (username.length() < 3 || password.length() < 6) {
-        QMessageBox::warning(this, "规范错误", "账号至少3位，密码至少6位！");
+        // 👇 替换系统弹窗
+       UIHelper::showCustomPopup(this, "⚠️ 规范错误", "账号至少3位，密码至少6位！", UIHelper::PopupType::Error);
         return;
     }
 
     // 2. 确认密码校验
     if (password != confirmPwd) {
-        QMessageBox::warning(this, "规范错误", "两次输入的密码不一致！");
+        // 👇 替换系统弹窗
+       UIHelper::showCustomPopup(this, "⚠️ 规范错误", "两次输入的密码不一致！", UIHelper::PopupType::Error);
         return;
     }
 
@@ -217,13 +222,15 @@ void LoginWidget::performRegister() {
 
     // 4. 调用 DBHelper 进行注册
     if (DBHelper::getInstance().registerUser(username, password, nickname)) {
-        QMessageBox::information(this, "注册成功", "乐手档案已创建，请凭门票入场！");
+        // 👇 完美调用：青色提示，并在回调函数中处理界面翻转！
+        UIHelper::showCustomPopup(this, "🎉 注册成功", "乐手档案已创建，请凭门票入场！", UIHelper::PopupType::Info, [this, username]() {
+            // 当玩家点击“明白”后，执行下面的代码
+            this->toggleMode();
+            this->m_userEdit->setText(username);
+            this->m_pwdEdit->setFocus();
+        });
 
-        // 【顶级体验】：注册成功后，自动切回登录页面，并帮玩家填好刚才注册的账号
-        toggleMode();
-        m_userEdit->setText(username);
-        m_pwdEdit->setFocus(); // 光标自动跳到密码框
     } else {
-        QMessageBox::critical(this, "注册失败", "用户名可能已被占用，或数据库通讯异常。");
+       UIHelper::showCustomPopup(this, "🚫 注册失败", "用户名可能已被占用，或数据库通讯异常。", UIHelper::PopupType::Error);
     }
 }

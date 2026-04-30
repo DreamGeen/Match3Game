@@ -30,8 +30,21 @@ private:
 // 霓虹弹窗工具类
 class UIHelper {
 public:
-    // 静态方法：随时随地，直接调用！
+    // 👇 新增：定义弹窗的三种核心状态
+    enum class PopupType {
+        Info,     // 提示类型：青色主题，1个“明白”按钮
+        Error,    // 错误类型：红色主题，1个“明白”按钮
+        Question  // 询问类型：红色主题，2个操作按钮
+    };
+
+    // 👇 新版核心函数：使用 PopupType 枚举来控制状态
+    static void showCustomPopup(QWidget* parent, const QString& title, const QString& msg, PopupType type, std::function<void()> onConfirm = nullptr);
+
+    // 👇 兼容旧版的桥梁函数：保留 bool isQuestion 参数，防止旧代码报错
     static void showCustomPopup(QWidget* parent, const QString& title, const QString& msg, bool isQuestion, std::function<void()> onConfirm = nullptr);
 };
+
+
+
 
 #endif // UIHELPER_H

@@ -12,6 +12,9 @@
 #include <QLabel>
 #include <QParallelAnimationGroup>
 #include <QPoint>
+#include <QKeyEvent>
+
+
 
 GamePanel::GamePanel(GameLogic *logic, QWidget *parent)
     : QWidget(parent), m_logic(logic)
@@ -56,6 +59,16 @@ GamePanel::GamePanel(GameLogic *logic, QWidget *parent)
         m_isAnimating = false; // 解除 UI 动画锁定，允许玩家再次拖拽
         emit actionFinished(); // 发送操作结束信号（通知 AI 可以思考下一步了）
     });
+
+
+    // 4. 监听【魔力鸟吸收】信号：触发放大与全屏吸收动画
+    connect(m_logic, &GameLogic::magicBirdTriggered, this, &GamePanel::onMagicBirdTriggered);
+
+
+
+
+    // 接收键盘输入
+    this->setFocusPolicy(Qt::StrongFocus);
 }
 
 
@@ -64,6 +77,7 @@ void GamePanel::initPanel() {
     // 根据逻辑层初始状态生成 64 个波奇/虹夏方块
     for(int r = 0; r < GameConfig::BOARD_ROWS; ++r) {
         for(int c = 0; c < GameConfig::BOARD_COLS; ++c) {
+
             Tile data = m_logic->getTile(r, c);
             m_blocks[r][c] = new BlockWidget(r, c, data, this);
         }
@@ -169,6 +183,11 @@ void GamePanel::onBoardChanged() {
             Tile newData = m_logic->getTile(r, c);
 
             m_blocks[r][c]->setTileData(newData);
+
+            // 👇 【核心补丁】：保底重置透明度。
+            // 确保那些没有被触发动画的方块（比如只是往下掉的方块）不会因为上一轮特效而永远隐身
+            m_blocks[r][c]->setOpacity(1.0);
+
 
             // 👇 核心动画逻辑：如果这个位置变成了新的实体方块（颜色不同，或是新生成的）
             if (newData.color != 0 && (oldData.color != newData.color || oldData.special != newData.special)) {
@@ -498,14 +517,180 @@ void GamePanel::playBombEffect(int row, int col) {
     animGroup->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
+void GamePanel::paintEvent(QPaintEvent *event) {
+    // 调用父类，保留原有透明背景属性
+    QWidget::paintEvent(event);
+
+    // 绘制魔力鸟的黑洞光晕
+    if (m_drawMagicBirdHalo && m_haloOpacity > 0.01) {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+
+        // 设置具有透明度的画刷
+        QRadialGradient gradient(m_magicBirdCenter, m_haloCurrentSize / 2.0);
+        gradient.setColorAt(0, QColor(255, 255, 255, 255 * m_haloOpacity));
+        gradient.setColorAt(0.3, QColor(138, 43, 226, 220 * m_haloOpacity));
+        gradient.setColorAt(1, QColor(0, 0, 0, 0));
+
+        painter.setBrush(gradient);
+        painter.setPen(Qt::NoPen);
+
+        // 在指定中心绘制光晕
+        painter.drawEllipse(m_magicBirdCenter, m_haloCurrentSize / 2, m_haloCurrentSize / 2);
+    }
+}
+
+
+void GamePanel::onMagicBirdTriggered(int row, int col, QList<QPoint> targets) {
+    m_isAnimating = true;
+
+    BlockWidget* magicBird = m_blocks[row][col];
+    if (!magicBird || targets.isEmpty()) {
+        m_isAnimating = false;
+        return;
+    }
+
+    if (m_matchSound) m_matchSound->play();
+
+    QSequentialAnimationGroup* sequenceGroup = new QSequentialAnimationGroup(this);
+
+    // 1. 初始化底层绘制所需的数据
+    int targetHaloSize = magicBird->width() * 2.5;
+    m_magicBirdCenter = magicBird->pos() + QPoint(magicBird->width() / 2, magicBird->height() / 2);
+    m_drawMagicBirdHalo = true; // 开启绘制
+    m_haloCurrentSize = 0;
+    m_haloOpacity = 1.0;
+
+    // ==========================================
+    // 阶段一：黑洞展开与鸟震颤
+    // ==========================================
+    QParallelAnimationGroup* chargeGroup = new QParallelAnimationGroup(this);
+
+    // 黑洞展开动画：通过改变变量并 update() 触发底层绘制
+    QVariantAnimation* haloExpand = new QVariantAnimation(this);
+    haloExpand->setDuration(450);
+    haloExpand->setStartValue(0);
+    haloExpand->setEndValue(targetHaloSize);
+    haloExpand->setEasingCurve(QEasingCurve::OutCubic);
+    connect(haloExpand, &QVariantAnimation::valueChanged, this, [=](const QVariant& val) {
+        m_haloCurrentSize = val.toInt();
+        this->update(); // 每一帧都通知系统重绘面板
+    });
+
+    QPropertyAnimation* birdShake = new QPropertyAnimation(magicBird, "pos");
+    birdShake->setDuration(450);
+    QPoint originPos = magicBird->pos();
+    birdShake->setStartValue(originPos);
+    birdShake->setKeyValueAt(0.15, originPos + QPoint(-4, -2));
+    birdShake->setKeyValueAt(0.45, originPos + QPoint(4, 3));
+    birdShake->setKeyValueAt(0.75, originPos + QPoint(-3, 4));
+    birdShake->setEndValue(originPos);
+
+    chargeGroup->addAnimation(haloExpand);
+    chargeGroup->addAnimation(birdShake);
+    sequenceGroup->addAnimation(chargeGroup);
+
+    // ==========================================
+    // 阶段二：吸附方块与黑洞消散
+    // ==========================================
+    QParallelAnimationGroup* absorbGroup = new QParallelAnimationGroup(this);
+
+    // 黑洞渐隐动画
+    QVariantAnimation* haloFade = new QVariantAnimation(this);
+    haloFade->setDuration(350);
+    haloFade->setStartValue(1.0);
+    haloFade->setEndValue(0.0);
+    connect(haloFade, &QVariantAnimation::valueChanged, this, [=](const QVariant& val) {
+        m_haloOpacity = val.toDouble();
+        this->update(); // 每一帧刷新透明度
+    });
+    absorbGroup->addAnimation(haloFade);
+
+    QPoint birdPos = magicBird->pos();
+    for (const QPoint& p : targets) {
+        BlockWidget* block = m_blocks[p.x()][p.y()];
+        if (!block || block == magicBird) continue;
+
+        block->raise(); // 保证飞行的方块在最上面
+
+        QPropertyAnimation* flyAnim = new QPropertyAnimation(block, "pos");
+        flyAnim->setDuration(350);
+        flyAnim->setStartValue(block->pos());
+        flyAnim->setEndValue(birdPos);
+        flyAnim->setEasingCurve(QEasingCurve::InBack);
+
+        QPropertyAnimation* fadeAnim = new QPropertyAnimation(block, "opacity");
+        fadeAnim->setDuration(350);
+        fadeAnim->setStartValue(1.0);
+        fadeAnim->setEndValue(0.0);
+
+        QParallelAnimationGroup* singleBlockGroup = new QParallelAnimationGroup(this);
+        singleBlockGroup->addAnimation(flyAnim);
+        singleBlockGroup->addAnimation(fadeAnim);
+
+        absorbGroup->addAnimation(singleBlockGroup);
+    }
+    sequenceGroup->addAnimation(absorbGroup);
+
+    // ==========================================
+    // 阶段三：安全清理
+    // ==========================================
+    connect(sequenceGroup, &QSequentialAnimationGroup::finished, this, [=]() {
+        // 恢复方块透明度
+        for (const QPoint& p : targets) {
+            if (m_blocks[p.x()][p.y()]) {
+                // ❌ 删掉或注释掉下面这行！不要在这里恢复透明度，让它们保持隐身！
+                // m_blocks[p.x()][p.y()]->setOpacity(1.0);
+
+                // 👇 核心修复：将被吸走的方块瞬间拽回它们原本的逻辑坐标位！
+                m_blocks[p.x()][p.y()]->move(BlockWidget::logicalToPixel(p.x(), p.y()));
+            }
+        }
+
+        // 👇 彻底关闭黑洞特效绘制
+        m_drawMagicBirdHalo = false;
+
+        sequenceGroup->deleteLater();
+        shakeScreen();
+        m_isAnimating = false;
+
+        // 执行最后一次干净的重绘
+        this->update();
+    });
+
+    sequenceGroup->start();
+}
 
 
 
 
+void GamePanel::keyPressEvent(QKeyEvent *event) {
+    // 确保有逻辑指针且不在动画锁定期间
+    if (!m_isAnimating && m_logic) {
+        switch (event->key()) {
+        case Qt::Key_M:
+            m_logic->debugSpawnSpecialBlock(SpecialType::MagicBird);
+            qDebug() << "🛸 开发者外挂：生成了 [魔力鸟]";
+            return; // 直接 return，不传给父类
 
+        case Qt::Key_H:
+            m_logic->debugSpawnSpecialBlock(SpecialType::LineHorizontal);
+            qDebug() << "🛸 开发者外挂：生成了 [横向特效]";
+            return;
 
+        case Qt::Key_V:
+            m_logic->debugSpawnSpecialBlock(SpecialType::LineVertical);
+            qDebug() << "🛸 开发者外挂：生成了 [纵向特效]";
+            return;
 
+        case Qt::Key_B:
+            m_logic->debugSpawnSpecialBlock(SpecialType::Bomb);
+            qDebug() << "🛸 开发者外挂：生成了 [爆炸炸弹]";
+            return;
+        }
+    }
 
-
-
+    // 如果按下的不是外挂键，交还给父类正常处理
+    QWidget::keyPressEvent(event);
+}
 
