@@ -9,9 +9,9 @@
 int main(int argc, char *argv[]) {
     QApplication a(argc, argv);
 
-    // 1. 连接数据库
-    bool ok = DBHelper::getInstance().connectDB("127.0.0.1", 3306, "mengqing", "8176445027aA,.", "match3_game_db");
-    if (!ok) return -1;
+    // // 1. 连接数据库
+    // bool ok = DBHelper::getInstance().connectDB("127.0.0.1", 3306, "mengqing", "8176445027aA,.", "match3_game_db");
+    // if (!ok) return -1;
 
     // 2. 创建全局唯一的“舞台” (堆栈窗口容器)
     QStackedWidget *mainStage = new QStackedWidget();
