@@ -1,208 +1,124 @@
 #include "DBHelper.h"
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QJsonDocument>
+#include <QEventLoop>
 #include <QDebug>
 
-// 获取单例对象
 DBHelper& DBHelper::getInstance() {
     static DBHelper instance;
     return instance;
 }
 
-// 私有构造函数
 DBHelper::DBHelper() {
-    // 关键点 1：彻底放弃 QMYSQL 字符串，直接初始化为 QODBC
-    // 检查是否已经存在默认连接，避免重复添加导致 Qt 报 "Duplicate connection" 警告
-    if (QSqlDatabase::contains(QSqlDatabase::defaultConnection)) {
-        db = QSqlDatabase::database(QSqlDatabase::defaultConnection);
-    } else {
-        db = QSqlDatabase::addDatabase("QODBC");
-    }
+    // 默认指向你的本地 Python 服务器
+    m_serverUrl = "http://127.0.0.1:5000";
 }
 
 DBHelper::~DBHelper() {
     disconnectDB();
 }
 
+// 🌟 核心封装函数：同步发送 HTTP POST 请求
+QJsonObject DBHelper::sendPostRequest(const QString& endpoint, const QJsonObject& payload) {
+    QNetworkAccessManager manager;
+    QNetworkRequest request(QUrl(m_serverUrl + endpoint));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QByteArray postData = QJsonDocument(payload).toJson();
+    QNetworkReply *reply = manager.post(request, postData);
+
+    // 使用 QEventLoop 挂起，实现同步请求，避免去改各种 UI 的异步逻辑
+    QEventLoop loop;
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    QJsonObject result;
+    if (reply->error() == QNetworkReply::NoError) {
+        QByteArray response = reply->readAll();
+        result = QJsonDocument::fromJson(response).object();
+    } else {
+        qDebug() << ">>> [Error] HTTP 请求失败:" << reply->errorString();
+        result["status"] = "error";
+    }
+
+    reply->deleteLater();
+    return result;
+}
+
 /**
- * @brief 连接数据库
- * 使用 ODBC 桥接方式解决驱动问题
+ * @brief 测试后端连通性
+ * 现在这里不需要任何账号密码了，只是为了不打破 main.cpp 里的原有逻辑
  */
-bool DBHelper::connectDB(const QString& host, int port, const QString& user, const QString& pwd, const QString& dbName) {
-    // 如果当前连接已打开，先关闭以刷新 DSN 配置
-    if (db.isOpen()) {
-        db.close();
+bool DBHelper::connectDB(const QString& /*host*/, int /*port*/, const QString& /*user*/, const QString& /*pwd*/, const QString& /*dbName*/) {
+    QJsonObject res = sendPostRequest("/api/ping", QJsonObject());
+    if (res["status"].toString() == "success") {
+        qDebug() << ">>> [Success] 已成功连接到 Python 后端网关！";
+        return true;
     }
-
-    // 关键点 2：构造 ODBC 连接字符串
-    // Driver 的名字必须与你电脑中“ODBC 数据源管理器”里安装的名字完全一致
-    // CharSet=utf8mb4 确保支持中文，Option=3 是官方推荐的兼容性参数
-    QString dsn = QString("Driver={MySQL ODBC 9.6 Unicode Driver};"
-                          "Server=%1;"
-                          "Port=%2;"
-                          "Database=%3;"
-                          "Uid=%4;"
-                          "Pwd=%5;"
-                         "CHARSET=UTF8;"
-                    "STMT=SET NAMES utf8mb4;" // 某些版本支持在初始化语句中注入
-                          "Option=3;")
-                      .arg(host).arg(port).arg(dbName).arg(user).arg(pwd);
-
-    db.setDatabaseName(dsn);
-
-    // 尝试打开连接
-    if (!db.open()) {
-        qDebug() << ">>> [Error] ODBC 连接失败，请确认驱动名称正确且 MySQL 服务已开启。";
-        qDebug() << ">>> 错误详情:" << db.lastError().text();
-        return false;
-    }
-
-    qDebug() << ">>> [Success] 已通过 QODBC 成功挂载 MySQL 数据库！";
-    return true;
+    qDebug() << ">>> [Error] 无法连接到后端，请确保 server.py 正在运行！";
+    return false;
 }
 
 void DBHelper::disconnectDB() {
-    if (db.isOpen()) {
-        db.close();
-        qDebug() << ">>> 数据库连接已断开";
-    }
+    // API 是无状态的，这里无需执行任何操作
 }
 
-/**
- * @brief 用户注册
- */
 bool DBHelper::registerUser(const QString& username, const QString& password, const QString& nickname) {
-    if (!db.isOpen()) return false;
+    QJsonObject payload;
+    payload["username"] = username;
+    payload["password"] = password;
+    payload["nickname"] = nickname;
 
-    QSqlQuery query(db);
-    query.prepare("INSERT INTO user_info (username, password, nickname) "
-                  "VALUES (:username, :password, :nickname)");
-    query.bindValue(":username", username);
-    query.bindValue(":password", password); // 提示：实际项目中建议存入 QCryptographicHash 后的散列值
-    query.bindValue(":nickname", nickname);
-
-    if (!query.exec()) {
-        qDebug() << ">>> 注册失败:" << query.lastError().text();
-        return false;
-    }
-    return true;
+    QJsonObject res = sendPostRequest("/api/register", payload);
+    return res["status"].toString() == "success";
 }
 
-/**
- * @brief 用户登录
- */
-// 在 DBHelper.cpp 中更新 login 函数
-bool DBHelper::login(const QString& username, const QString& password, int& outUserId, QString& outNickname,int& outAvatarId, int& outTotalScore) {
-    if (!db.isOpen()) return false;
+bool DBHelper::login(const QString& username, const QString& password, int& outUserId, QString& outNickname, int& outAvatarId, int& outTotalScore) {
+    QJsonObject payload;
+    payload["username"] = username;
+    payload["password"] = password;
 
-    QSqlQuery query(db);
-    // 增加对 nickname 的获取
-    query.prepare("SELECT user_id, nickname, avatar_id, total_score FROM user_info "
-                  "WHERE username = :username AND password = :password");
-    query.bindValue(":username", username);
-    query.bindValue(":password", password);
+    QJsonObject res = sendPostRequest("/api/login", payload);
 
-    if (query.exec() && query.next()) {
-        outUserId = query.value("user_id").toInt();
-        outNickname = query.value("nickname").toString();
-
-        // 👇【关键修复】：将数据库查到的值赋给传出参数
-        outAvatarId = query.value("avatar_id").toInt();
-        outTotalScore = query.value("total_score").toInt();
-
-        // 更新在线状态
-        QSqlQuery updateQuery(db);
-        updateQuery.prepare("UPDATE user_info SET is_online = 1 WHERE user_id = :userId");
-        updateQuery.bindValue(":userId", outUserId);
-        updateQuery.exec();
-
+    if (res["status"].toString() == "success") {
+        QJsonObject data = res["data"].toObject();
+        outUserId = data["uid"].toInt();
+        outNickname = data["nickname"].toString();
+        outAvatarId = data["avatarId"].toInt();
+        outTotalScore = data["totalScore"].toInt();
         return true;
     }
     return false;
 }
 
-/**
- * @brief 登出
- */
 bool DBHelper::logout(int userId) {
-    if (!db.isOpen()) return false;
-
-    QSqlQuery query(db);
-    query.prepare("UPDATE user_info SET is_online = 0 WHERE user_id = :userId");
-    query.bindValue(":userId", userId);
-    return query.exec();
+    QJsonObject payload;
+    payload["userId"] = userId;
+    QJsonObject res = sendPostRequest("/api/logout", payload);
+    return res["status"].toString() == "success";
 }
 
-/**
- * @brief 记录战绩
- * 核心逻辑：使用事务保证“记录写入”和“积分更新”要么同时成功，要么同时失败
- */
 bool DBHelper::recordGameResult(int userId, int score, GameMode mode, bool isWin, int durationSec) {
-    if (!db.isOpen()) return false;
+    QJsonObject payload;
+    payload["userId"] = userId;
+    payload["score"] = score;
+    payload["gameMode"] = static_cast<int>(mode);
+    payload["isWin"] = isWin ? 1 : 0;
+    payload["durationSec"] = durationSec;
 
-    // 关键点 3：开启事务
-    if (!db.transaction()) {
-        qDebug() << ">>> 事务开启失败:" << db.lastError().text();
-        return false;
-    }
-
-    QSqlQuery query(db);
-
-    // 1. 插入战绩历史
-    query.prepare("INSERT INTO game_history (user_id, score, game_mode, is_win, duration_sec) "
-                  "VALUES (:userId, :score, :gameMode, :isWin, :durationSec)");
-    query.bindValue(":userId", userId);
-    query.bindValue(":score", score);
-    // 关键点 4：类型对齐，将 C++17 枚举类强转为 int 存入数据库
-    query.bindValue(":gameMode", static_cast<int>(mode));
-    query.bindValue(":isWin", isWin ? 1 : 0);
-    query.bindValue(":durationSec", durationSec);
-
-    if (!query.exec()) {
-        qDebug() << ">>> 写入战绩失败:" << query.lastError().text();
-        db.rollback(); // 发生错误，撤销之前的操作
-        return false;
-    }
-
-    // ==========================================
-    // 2. 更新用户总积分 (加入输了扣分机制)
-    // ==========================================
-    if (isWin) {
-        // 【胜利】：正常加上本局打出的得分
-        query.prepare("UPDATE user_info SET total_score = total_score + :score WHERE user_id = :userId");
-        query.bindValue(":score", score);
-    } else {
-        // 【失败】：扣除固定分数 (这里设定为扣除 3000 分，你可以根据难度自行调整)
-        int penalty = 3000;
-
-        // 使用 MySQL 的 GREATEST 函数，确保总分最低降到 0，不会出现负数积分
-        query.prepare("UPDATE user_info SET total_score = GREATEST(0, CAST(total_score AS SIGNED) - :penalty) WHERE user_id = :userId");
-        query.bindValue(":penalty", penalty);
-    }
-
-    query.bindValue(":userId", userId);
-
-    if (!query.exec()) {
-        qDebug() << ">>> 更新积分失败:" << query.lastError().text();
-        db.rollback();
-        return false;
-    }
-
-    // 3. 提交事务
-    return db.commit();
+    QJsonObject res = sendPostRequest("/api/record", payload);
+    return res["status"].toString() == "success";
 }
-
 
 int DBHelper::getUserTotalScore(int userId) {
-    if (!db.isOpen()) return 0;
+    QJsonObject payload;
+    payload["userId"] = userId;
+    QJsonObject res = sendPostRequest("/api/get_score", payload);
 
-    QSqlQuery query(db);
-    query.prepare("SELECT total_score FROM user_info WHERE user_id = :userId");
-    query.bindValue(":userId", userId);
-
-    if (query.exec() && query.next()) {
-        return query.value("total_score").toInt();
+    if (res["status"].toString() == "success") {
+        return res["score"].toInt();
     }
     return 0;
 }

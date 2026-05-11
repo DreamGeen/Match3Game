@@ -2,62 +2,44 @@
 #define DBHELPER_H
 
 #include <QString>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QVariant>
-#include <QDebug>
+#include <QJsonObject>
 #include "Global.h"
 
 class DBHelper {
 public:
-    // 获取单例实例
     static DBHelper& getInstance();
-
-    // 禁止拷贝和赋值
     DBHelper(const DBHelper&) = delete;
     DBHelper& operator=(const DBHelper&) = delete;
 
-    /**
-     * @brief 初始化并连接数据库
-     * @note 默认使用 "MySQL ODBC 8.0 Unicode Driver"，请确保系统已安装该驱动
-     */
+    // 连接测试 (现在它只负责发个请求问问 Python 后端在不在)
     [[nodiscard]] bool connectDB(const QString& host, int port, const QString& user,
                                  const QString& pwd, const QString& dbName);
 
-    // 关闭数据库连接
     void disconnectDB();
 
-    // --- 业务接口 ---
-
-    // 用户注册
+    // 业务接口保持原样，无需修改上层逻辑
     [[nodiscard]] bool registerUser(const QString& username, const QString& password,
                                     const QString& nickname = "新玩家");
 
-    // 用户登录
-    [[nodiscard]]  bool login(const QString& username, const QString& password,
-               int& outUserId, QString& outNickname,
-               int& outAvatarId, int& outTotalScore);
+    [[nodiscard]] bool login(const QString& username, const QString& password,
+                             int& outUserId, QString& outNickname,
+                             int& outAvatarId, int& outTotalScore);
 
-    // 退出登录
     bool logout(int userId);
 
-    /**
-     * @brief 记录游戏战绩
-     * @param gameMode 使用枚举类 GameMode
-     */
     [[nodiscard]] bool recordGameResult(int userId, int score, GameMode mode,
                                         bool isWin, int durationSec);
 
-    // 获取用户最新总积分
     int getUserTotalScore(int userId);
 
 private:
-    // 私有构造函数 (单例模式要求)
     DBHelper();
     ~DBHelper();
 
-    QSqlDatabase db;
+    // 🌟 核心封装：负责把所有的操作转换为发给 Python 的 POST 请求
+    QJsonObject sendPostRequest(const QString& endpoint, const QJsonObject& payload);
+
+    QString m_serverUrl; // 后端 API 的基础地址
 };
 
 #endif // DBHELPER_H
