@@ -53,3 +53,10 @@ RESOURCES += \
 
 DISTFILES += \
     res/bomb/effect_glitch.png
+
+
+# --- 终极消除黑框代码（必须放在文件最末尾） ---
+CONFIG += windows
+CONFIG -= console
+QMAKE_LFLAGS_WINDOWS = -mwindows
+QMAKE_LFLAGS_CONSOLE = -mwindows
